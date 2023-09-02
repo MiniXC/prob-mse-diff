@@ -32,17 +32,24 @@ console = Console()
 from configs.args import TrainingArgs, ModelArgs, CollatorArgs
 from configs.validation import validate_args
 from util.remote import wandb_update_config, wandb_init, push_to_hub
-from model.simple_mlp import SimpleMLP
+from model.unet_2d_condition import UNet2DConditionModel
 from collators import get_collator
 
 
 def print_and_draw_model():
     dummy_input = model.dummy_input
     # repeat dummy input to match batch size (regardless of how many dimensions)
-    dummy_input = dummy_input.repeat(
-        (training_args.batch_size,) + (1,) * (len(dummy_input.shape) - 1)
-    )
-    console_print(f"[green]input shape[/green]: {dummy_input.shape}")
+    if isinstance(dummy_input, torch.Tensor):
+        dummy_input = dummy_input.repeat(
+            (training_args.batch_size,) + (1,) * (len(dummy_input.shape) - 1)
+        )
+        console_print(f"[green]input shape[/green]: {dummy_input.shape}")
+    elif isinstance(dummy_input, list):
+        dummy_input = [
+            x.repeat((training_args.batch_size,) + (1,) * (len(x.shape) - 1))
+            for x in dummy_input
+        ]
+        console_print(f"[green]input shapes[/green]: {[x.shape for x in dummy_input]}")
     model_summary = summary(
         model,
         input_data=dummy_input,
@@ -279,7 +286,7 @@ def main():
     console_print(f"[green]process_index[/green]: {accelerator.process_index}")
 
     # model
-    model = SimpleMLP(model_args)
+    model = UNet2DConditionModel(model_args)
     console_rule("Model")
     print_and_draw_model()
 
