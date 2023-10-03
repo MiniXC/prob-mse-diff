@@ -1,10 +1,10 @@
-from .args import TrainingArgs, ModelArgs, CollatorArgs
+from .args import TrainingArgs, ModelArgs, EncoderCollatorArgs, DecoderCollatorArgs
 
 
 def validate_args(*args):
     for arg in args:
         if isinstance(arg, TrainingArgs):
-            if arg.dataset not in ["mnist"]:
+            if arg.dataset not in ["cdminix/librispeech-phones-and-mel"]:
                 raise ValueError(f"dataset {arg.dataset} not supported")
             if arg.lr_schedule not in ["linear_with_warmup"]:
                 raise ValueError(f"lr_schedule {arg.lr_schedule} not supported")
@@ -60,6 +60,3 @@ def validate_args(*args):
                 raise ValueError(
                     f"{arg.time_embedding_type} does not exist. Please make sure to use one of `fourier` or `positional`."
                 )
-        if isinstance(arg, CollatorArgs):
-            if arg.name not in ["default"]:
-                raise ValueError(f"collator {arg.name} not supported")

@@ -14,33 +14,46 @@ class TrainingArgs:
     wandb_mode: str = "offline"
     wandb_project: str = None
     wandb_dir: str = "wandb"
-    train_split: str = "train"
-    val_split: str = "test"
+    train_split: str = "train.other.500+train.clean.360+train.clean.100"
+    speakers_in_validation: int = 100
+    unseen_validation_split: str = "dev.other+dev.clean+test.other+test.clean"
     n_steps: int = 10000
     batch_size: int = 4
     seed: int = 0
-    dataset: str = "mnist"
+    dataset: str = "cdminix/librispeech-phones-and-mel"
     log_every_n_steps: int = 100
     do_full_eval: bool = True
     do_save: bool = False
-    save_onnx: bool = False
+    save_onx: bool = False
     eval_only: bool = False
     eval_every_n_steps: int = 1000
     save_every_n_steps: int = 1000
     push_to_hub: bool = False
     hub_repo: str = None
+    train_type: str = "encoder"
+    ddpm_num_steps: int = 1000
+    ddpm_beta_schedule: str = "linear"
+    ddpm_num_steps_inference: int = 100
 
 
 @dataclass
-class CollatorArgs:
-    normalize: bool = True
-    onehot: bool = True
-    name: str = "default"
+class EncoderCollatorArgs:
+    enc_max_length: int = 512
+    enc_pack_factor: int = 4
+    enc_verbose: bool = False
+
+
+@dataclass
+class DecoderCollatorArgs:
+    dec_max_length: int = 2048
+    dec_pack_factor: int = 4
+    dec_verbose: bool = False
 
 
 @dataclass
 class ModelArgs:
     sample_size: int = (512, 80)
+    model_type: str = "encoder"
     in_channels: int = 1
     out_channels: int = 1
     center_input_sample: bool = False

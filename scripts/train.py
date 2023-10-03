@@ -11,6 +11,10 @@ from torch.utils.data import DataLoader
 from accelerate import Accelerator
 from transformers import get_linear_schedule_with_warmup, HfArgumentParser
 from datasets import load_dataset
+import torch.nn.functional as F
+
+# diffusers
+from diffusers import DDPMScheduler
 
 # logging & etc
 from torchinfo import summary
@@ -29,10 +33,16 @@ from figures.plotting import plot_first_batch
 console = Console()
 
 # local imports
-from configs.args import TrainingArgs, ModelArgs, CollatorArgs
+from configs.args import (
+    TrainingArgs,
+    ModelArgs,
+    EncoderCollatorArgs,
+    DecoderCollatorArgs,
+)
 from configs.validation import validate_args
 from util.remote import wandb_update_config, wandb_init, push_to_hub
 from model.unet_2d_condition import UNet2DConditionModel
+from model.pipeline import DDPMPipeline
 from collators import get_collator
 
 
@@ -130,8 +140,42 @@ def train_epoch(epoch):
     last_loss = None
     for batch in train_dl:
         with accelerator.accumulate(model):
-            y = model(batch["image"])
-            loss = torch.nn.functional.cross_entropy(y, batch["target"])
+            if training_args.train_type == "encoder":
+                packed_prosody, packed_phones, packed_speaker = batch
+                noise = torch.randn(packed_prosody.shape).to(packed_prosody.device)
+                bsz = packed_prosody.shape[0]
+                timesteps = torch.randint(
+                    0,
+                    scheduler.config.num_train_timesteps,
+                    (bsz,),
+                    device=packed_prosody.device,
+                ).long()
+                noisy_ = scheduler.add_noise(packed_prosody, noise, timesteps)
+                output = model(noisy_, timesteps, packed_phones, packed_speaker)
+                loss = F.mse_loss(output, packed_prosody)
+            elif training_args.train_type == "decoder":
+                (
+                    packed_prosody,
+                    packed_phones,
+                    packed_speaker,
+                    packed_mel,
+                ) = batch
+                noise = torch.randn(packed_mel.shape).to(packed_mel.device)
+                bsz = packed_mel.shape[0]
+                timesteps = torch.randint(
+                    0,
+                    scheduler.config.num_train_timesteps,
+                    (bsz,),
+                    device=packed_mel.device,
+                ).long()
+                noisy_ = scheduler.add_noise(packed_mel, noise, timesteps)
+                output = model(
+                    noisy_,
+                    timesteps,
+                    packed_phones,
+                    packed_speaker,
+                    packed_prosody,
+                )
             accelerator.backward(loss)
             accelerator.clip_grad_norm_(
                 model.parameters(), training_args.gradient_clip_val
@@ -176,43 +220,21 @@ def train_epoch(epoch):
 
 def evaluate():
     model.eval()
-    y_true = []
-    y_pred = []
-    losses = []
-    console_rule("Evaluation")
-    for batch in val_dl:
-        y = model(batch["image"])
-        loss = torch.nn.functional.cross_entropy(y, batch["target"])
-        losses.append(loss.detach())
-        y_true.append(batch["target"].cpu().numpy())
-        y_pred.append(y.argmax(-1).cpu().numpy())
-    y_true = np.concatenate(y_true)
-    y_pred = np.concatenate(y_pred)
-    wandb_log("val", {"loss": torch.mean(torch.tensor(losses)).item()})
-    acc = accuracy_score(y_true, y_pred)
-    f1 = f1_score(y_true, y_pred, average="macro")
-    precision = precision_score(y_true, y_pred, average="macro", zero_division=0)
-    recall = recall_score(y_true, y_pred, average="macro")
-    wandb_log("val", {"acc": acc, "f1": f1, "precision": precision, "recall": recall})
+    evaluate_loss_only()
 
 
 def evaluate_loss_only():
     model.eval()
-    losses = []
-    console_rule("Evaluation")
-    for batch in val_dl:
-        y = model(batch["image"])
-        loss = torch.nn.functional.cross_entropy(y, batch["target"])
-        losses.append(loss.detach())
-    wandb_log("val", {"loss": torch.mean(torch.tensor(losses)).item()})
 
 
 def main():
-    global accelerator, training_args, model_args, collator_args, train_dl, val_dl, optimizer, scheduler, model, global_step, pbar
+    global accelerator, training_args, model_args, collator_args, train_dl, val_dl, optimizer, scheduler, model, global_step, pbar, scheduler, pipeline
 
     global_step = 0
 
-    parser = HfArgumentParser([TrainingArgs, ModelArgs, CollatorArgs])
+    parser = HfArgumentParser(
+        [TrainingArgs, ModelArgs, EncoderCollatorArgs, DecoderCollatorArgs]
+    )
 
     accelerator = Accelerator()
 
@@ -224,7 +246,8 @@ def main():
         (
             training_args,
             model_args,
-            collator_args,
+            enc_collator_args,
+            dec_collator_args,
         ) = parser.parse_args_into_dataclasses(sys.argv[2:])
         # update args from yaml
         for k, v in args_dict.items():
@@ -232,8 +255,10 @@ def main():
                 setattr(training_args, k, v)
             if hasattr(model_args, k):
                 setattr(model_args, k, v)
-            if hasattr(collator_args, k):
-                setattr(collator_args, k, v)
+            if hasattr(enc_collator_args, k):
+                setattr(enc_collator_args, k, v)
+            if hasattr(dec_collator_args, k):
+                setattr(dec_collator_args, k, v)
         if len(sys.argv) > 2:
             console_print(
                 f"[yellow]WARNING[/yellow]: yaml args will be override command line args"
@@ -242,8 +267,16 @@ def main():
         (
             training_args,
             model_args,
-            collator_args,
+            enc_collator_args,
+            dec_collator_args,
         ) = parser.parse_args_into_dataclasses()
+
+    if training_args.train_type == "encoder":
+        collator_args = enc_collator_args
+    elif training_args.train_type == "decoder":
+        collator_args = dec_collator_args
+    else:
+        raise ValueError(f"train_type {training_args.train_type} not supported")
 
     # check if run name is specified
     if training_args.run_name is None:
@@ -295,21 +328,44 @@ def main():
 
     console_print(f"[green]dataset[/green]: {training_args.dataset}")
     console_print(f"[green]train_split[/green]: {training_args.train_split}")
-    console_print(f"[green]val_split[/green]: {training_args.val_split}")
+    console_print(f"[green]val_split[/green] will be generated from train_split")
 
     train_ds = load_dataset(training_args.dataset, split=training_args.train_split)
-    val_ds = load_dataset(training_args.dataset, split=training_args.val_split)
+    np.random.seed(training_args.seed)
+    speakers = np.random.choice(
+        train_ds.unique("speaker_id"),
+        size=training_args.speakers_in_validation,
+        replace=False,
+    )
+    # get training_args.samples_per_speaker_in_validation samples per speaker
+    val_ds = train_ds.filter(
+        lambda x: x["speaker_id"] in speakers and np.random.rand() < 0.5,
+        keep_in_memory=True,
+    )
+    val_ids = val_ds.unique("id")
+    # remove val_ds from train_ds
+    train_ds = train_ds.filter(lambda x: x["id"] not in val_ids, keep_in_memory=True)
+
+    val_ds_unseen = load_dataset(
+        training_args.dataset,
+        split=training_args.unseen_validation_split,
+        keep_in_memory=True,
+    )
+
+    print(f"train_ds: {len(train_ds)}")
+    print(f"val_ds: {len(val_ds)}")
+    print(f"val_ds_unseen: {len(val_ds_unseen)}")
 
     console_print(f"[green]train[/green]: {len(train_ds)}")
     console_print(f"[green]val[/green]: {len(val_ds)}")
 
     # collator
-    collator = get_collator(collator_args)
+    collator = get_collator(training_args, collator_args)
 
     # plot first batch
     if accelerator.is_main_process:
         first_batch = collator([train_ds[i] for i in range(training_args.batch_size)])
-        plot_first_batch(first_batch, training_args)
+        plot_first_batch(first_batch, training_args, collator_args)
         plt.savefig("figures/first_batch.png")
 
     # dataloader
@@ -340,6 +396,13 @@ def main():
         )
     else:
         raise NotImplementedError(f"{training_args.lr_schedule} not implemented")
+
+    scheduler = DDPMScheduler(
+        num_train_timesteps=training_args.ddpm_num_steps,
+        beta_schedule=training_args.ddpm_beta_schedule,
+        timestep_spacing="linspace",
+    )
+    pipeline = DDPMPipeline(model, scheduler, model_type=training_args.train_type)
 
     # accelerator
     model, optimizer, train_dl, val_dl, scheduler = accelerator.prepare(

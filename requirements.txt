@@ -3,6 +3,7 @@ torchview==0.2.6
 accelerate==0.21.0
 transformers==4.31.0
 datasets==2.14.4
+diffusers==0.21.4
 seaborn==0.12.2
 matplotlib==3.7.2
 pandas==2.0.3

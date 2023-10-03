@@ -74,6 +74,32 @@ class UNet2DConditionModel(nn.Module):
             cond_proj_dim=args.time_cond_proj_dim,
         )
 
+        if args.model_type == "encoder":
+            self.phone_embedding = nn.Embedding(100, args.block_out_channels[0])
+            self.speaker_embedding = nn.Sequential(
+                nn.Linear(256, args.block_out_channels[0]),
+                nn.GELU(),
+                nn.Linear(args.block_out_channels[0], args.block_out_channels[0]),
+            )
+        elif args.model_type == "decoder":
+            self.phone_embedding = nn.Embedding(100, args.block_out_channels[0])
+            self.phone_embedding_mid = nn.Embedding(100, args.block_out_channels[-1])
+            self.speaker_embedding = nn.Sequential(
+                nn.Linear(256, args.block_out_channels[0]),
+                nn.GELU(),
+                nn.Linear(args.block_out_channels[0], args.block_out_channels[0]),
+            )
+            self.speaker_embedding_temporal = nn.Sequential(
+                nn.Linear(40, args.block_out_channels[0]),
+                nn.GELU(),
+                nn.Linear(args.block_out_channels[0], args.block_out_channels[0]),
+            )
+            self.prosody_embedding = nn.Sequential(
+                nn.Linear(80, args.block_out_channels[0]),
+                nn.GELU(),
+                nn.Linear(args.block_out_channels[0], args.block_out_channels[0]),
+            )
+
         if args.time_embedding_act_fn is None:
             self.time_embed_act = None
         else:
@@ -287,11 +313,12 @@ class UNet2DConditionModel(nn.Module):
         self,
         sample,
         timesteps,
-        encoder_hidden_states,
-        timestep_cond=None,
+        phone_cond,
+        speaker_cond,
+        prosody_cond=None,
         attention_mask=None,
+        encoder_hidden_states=None,
         encoder_attention_mask=None,
-        return_dict=True,
     ):
         upsample_size = None
 
@@ -318,16 +345,32 @@ class UNet2DConditionModel(nn.Module):
         t_emb = self.time_proj(timesteps)
         t_emb = t_emb.to(dtype=sample.dtype)
 
-        emb = self.time_embedding(t_emb, timestep_cond)
+        if self.args.model_type == "encoder":
+            phone_emb = self.phone_embedding(phone_cond)
+            print(speaker_cond.shape, "speaker_cond")
+            print(speaker_cond.device, "speaker_cond.device")
+            speaker_emb = self.speaker_embedding(speaker_cond)
+            cond = phone_emb + speaker_emb
+        elif self.args.model_type == "decoder":
+            phone_emb = self.phone_embedding(phone_cond)
+            speaker_emb = self.speaker_embedding(speaker_cond)
+            prosody_emb = self.prosody_embedding(prosody_cond)
+            cond = phone_emb + speaker_emb + prosody_emb
+
+        cond = cond.transpose(1, 2).unsqueeze(-1)
+
+        print(t_emb.shape, "t_emb.shape")
+        emb = self.time_embedding(t_emb, None)
 
         if self.time_embed_act is not None:
             emb = self.time_embed_act(emb)
 
+        print(sample.shape, "sample.shape")
         sample = self.conv_in(sample)
 
-        down_block_res_samples = (sample,)
+        sample = sample + cond
 
-        print(sample.shape, "sample shape before downsample block")
+        down_block_res_samples = (sample,)
 
         for downsample_block in self.down_blocks:
             if (
@@ -342,15 +385,13 @@ class UNet2DConditionModel(nn.Module):
                     encoder_attention_mask=encoder_attention_mask,
                 )
             else:
+                print("downsample_block input", sample.shape, emb.shape)
                 sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
-
-            print(sample.shape, "sample shape after downsample block")
 
             down_block_res_samples += res_samples
 
         # 4. mid
         if self.mid_block is not None:
-            print(sample.shape, emb.shape, encoder_hidden_states.shape)
             sample = self.mid_block(
                 sample,
                 emb,
@@ -399,9 +440,6 @@ class UNet2DConditionModel(nn.Module):
             sample = self.conv_act(sample)
         sample = self.conv_out(sample)
 
-        if not return_dict:
-            return (sample,)
-
         return sample
 
     def save_model(self, path, accelerator=None):
@@ -432,8 +470,24 @@ class UNet2DConditionModel(nn.Module):
     @property
     def dummy_input(self):
         torch.manual_seed(0)
-        return [
-            torch.randn(1, 1, *self.sample_size),
-            torch.randint(0, 100, (1,)),
-            torch.randn(1, 256, self.args.cross_attention_dim[0]),
-        ]
+        if self.args.model_type == "encoder":
+            return [
+                torch.randn(1, 1, *self.sample_size),
+                torch.randint(0, 100, (1,)),
+                torch.randint(
+                    0,
+                    100,
+                    (
+                        1,
+                        self.sample_size[0],
+                    ),
+                ),
+                torch.randn(1, self.sample_size[0], 256),
+            ]
+        elif self.args.model_type == "decoder":
+            return [
+                torch.randn(1, 1, *self.sample_size),
+                torch.randint(0, 100, (1,)),
+                torch.randn(1, self.sample_size[0], 256),
+                torch.randn(1, self.sample_size[0], 80),
+            ]
