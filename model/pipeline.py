@@ -1,6 +1,7 @@
 import torch
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.utils.torch_utils import randn_tensor
+import copy
 
 
 class DDPMPipeline(DiffusionPipeline):
@@ -19,10 +20,14 @@ class DDPMPipeline(DiffusionPipeline):
     """
     model_cpu_offload_seq = "unet"
 
-    def __init__(self, unet, scheduler, model_type="encoder"):
+    def __init__(self, unet, scheduler, model_args, device="cpu"):
         super().__init__()
+        # instantiate copy of unet
         self.register_modules(unet=unet, scheduler=scheduler)
-        self.model_type = model_type
+        self.model_args = model_args
+        self.unet = self.unet.to(device)
+        self.unet.eval()
+        self._device = device
 
     @torch.no_grad()
     def __call__(
@@ -32,38 +37,41 @@ class DDPMPipeline(DiffusionPipeline):
         prosody_cond=None,
         speaker_cond_temporal=None,
         batch_size=1,
-        num_inference_steps=1000,
         generator=None,
     ):
-        if isinstance(self.unet.config.sample_size, int):
+        if isinstance(self.model_args.sample_size, int):
             image_shape = (
                 batch_size,
-                self.unet.config.in_channels,
-                self.unet.config.sample_size,
-                self.unet.config.sample_size,
+                self.model_args.in_channels,
+                self.model_args.sample_size,
+                self.model_args.sample_size,
             )
         else:
             image_shape = (
                 batch_size,
-                self.unet.config.in_channels,
-                *self.unet.config.sample_size,
+                self.model_args.in_channels,
+                *self.model_args.sample_size,
             )
 
-        image = randn_tensor(image_shape, device=self.device, generator=generator)
-
-        # set step values
-        self.scheduler.set_timesteps(num_inference_steps)
+        image = randn_tensor(image_shape, device=self._device, generator=generator)
 
         for t in self.progress_bar(self.scheduler.timesteps):
             # 1. predict noise model_output
-            if self.model_type == "encoder":
+            image = image.to(self._device)
+            phone_cond = phone_cond.to(self._device)
+            speaker_cond = speaker_cond.to(self._device)
+            if prosody_cond is not None:
+                prosody_cond = prosody_cond.to(self._device)
+            if speaker_cond_temporal is not None:
+                speaker_cond_temporal = speaker_cond_temporal.to(self._device)
+            if self.model_args.model_type == "encoder":
                 model_output = self.unet(
                     image,
                     t,
                     phone_cond,
                     speaker_cond,
                 )
-            elif self.model_type == "decoder":
+            elif self.model_args.model_type == "decoder":
                 model_output = self.unet(
                     image,
                     t,
@@ -78,6 +86,6 @@ class DDPMPipeline(DiffusionPipeline):
                 model_output, t, image, generator=generator
             ).prev_sample
 
-        image = image.cpu().permute(0, 2, 3, 1).numpy()
+        image = image.cpu()
 
         return image

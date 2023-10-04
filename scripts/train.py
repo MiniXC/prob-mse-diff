@@ -46,18 +46,16 @@ from model.pipeline import DDPMPipeline
 from collators import get_collator
 
 
-def print_and_draw_model():
+def print_and_draw_model(pack_factor):
+    bsz = training_args.batch_size // pack_factor
     dummy_input = model.dummy_input
     # repeat dummy input to match batch size (regardless of how many dimensions)
     if isinstance(dummy_input, torch.Tensor):
-        dummy_input = dummy_input.repeat(
-            (training_args.batch_size,) + (1,) * (len(dummy_input.shape) - 1)
-        )
+        dummy_input = dummy_input.repeat((bsz,) + (1,) * (len(dummy_input.shape) - 1))
         console_print(f"[green]input shape[/green]: {dummy_input.shape}")
     elif isinstance(dummy_input, list):
         dummy_input = [
-            x.repeat((training_args.batch_size,) + (1,) * (len(x.shape) - 1))
-            for x in dummy_input
+            x.repeat((bsz,) + (1,) * (len(x.shape) - 1)) for x in dummy_input
         ]
         console_print(f"[green]input shapes[/green]: {[x.shape for x in dummy_input]}")
     model_summary = summary(
@@ -97,7 +95,7 @@ def wandb_log(prefix, log_dict, round_n=3, print_log=True):
         log_dict = {f"{prefix}/{k}": v for k, v in log_dict.items()}
         wandb.log(log_dict, step=global_step)
         if print_log:
-            log_dict = {k: round(v, round_n) for k, v in log_dict.items()}
+            log_dict = {k: round(v, round_n) for k, v in log_dict.items() if "image" not in k}
             console.log(log_dict)
 
 
@@ -107,14 +105,23 @@ def seed_everything(seed):
     np.random.seed(seed)
 
 
-def save_checkpoint():
+def save_checkpoint(name_override=None):
     accelerator.wait_for_everyone()
     checkpoint_name = training_args.run_name
+    if name_override is not None:
+        name = name_override
+    else:
+        name = f"step_{global_step}"
     checkpoint_path = (
-        Path(training_args.checkpoint_path) / checkpoint_name / f"step_{global_step}"
+        Path(training_args.checkpoint_path) / checkpoint_name / name
     )
+    if name_override is None:
+        # remove old checkpoints
+        if checkpoint_path.exists():
+            for f in checkpoint_path.iterdir():
+                os.remove(f)
     # model
-    model.save_model(checkpoint_path, accelerator, onnx=training_args.save_onnx)
+    model.save_model(checkpoint_path, accelerator)
     if accelerator.is_main_process:
         # training args
         with open(checkpoint_path / "training_args.yml", "w") as f:
@@ -129,6 +136,7 @@ def save_checkpoint():
                 commit_message=f"step {global_step}",
             )
     accelerator.wait_for_everyone()
+    return checkpoint_path
 
 
 def train_epoch(epoch):
@@ -141,16 +149,16 @@ def train_epoch(epoch):
     for batch in train_dl:
         with accelerator.accumulate(model):
             if training_args.train_type == "encoder":
-                packed_prosody, packed_phones, packed_speaker = batch
+                packed_prosody, packed_phones, packed_speaker, packed_mask = batch
                 noise = torch.randn(packed_prosody.shape).to(packed_prosody.device)
                 bsz = packed_prosody.shape[0]
                 timesteps = torch.randint(
                     0,
-                    scheduler.config.num_train_timesteps,
+                    noise_scheduler.config.num_train_timesteps,
                     (bsz,),
                     device=packed_prosody.device,
                 ).long()
-                noisy_ = scheduler.add_noise(packed_prosody, noise, timesteps)
+                noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
                 output = model(noisy_, timesteps, packed_phones, packed_speaker)
                 loss = F.mse_loss(output, packed_prosody)
             elif training_args.train_type == "decoder":
@@ -159,16 +167,17 @@ def train_epoch(epoch):
                     packed_phones,
                     packed_speaker,
                     packed_mel,
+                    packed_mask,
                 ) = batch
                 noise = torch.randn(packed_mel.shape).to(packed_mel.device)
                 bsz = packed_mel.shape[0]
                 timesteps = torch.randint(
                     0,
-                    scheduler.config.num_train_timesteps,
+                    noise_scheduler.config.num_train_timesteps,
                     (bsz,),
                     device=packed_mel.device,
                 ).long()
-                noisy_ = scheduler.add_noise(packed_mel, noise, timesteps)
+                noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
                 output = model(
                     noisy_,
                     timesteps,
@@ -219,16 +228,116 @@ def train_epoch(epoch):
 
 
 def evaluate():
-    model.eval()
+    # pass the first batch through the pipeline
+    checkpoint_path = save_checkpoint("temp")
+    eval_model = UNet2DConditionModel(model_args)
+    eval_model.from_pretrained(checkpoint_path)
+    eval_noise_scheduler = DDPMScheduler(
+        num_train_timesteps=training_args.ddpm_num_steps_inference,
+        beta_schedule=training_args.ddpm_beta_schedule,
+        timestep_spacing="linspace",
+    )
+    pipeline = DDPMPipeline(
+        eval_model, eval_noise_scheduler, model_args, device="cpu"
+    )
+    with torch.no_grad():
+        if training_args.train_type == "encoder":
+            packed_prosody, packed_phones, packed_speaker = next(iter(val_dl))
+            noise = torch.randn(packed_prosody.shape).to(packed_prosody.device)
+            bsz = packed_prosody.shape[0]
+            output = pipeline(packed_phones, packed_speaker)
+            fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
+            for b in range(bsz):
+                axes[b][0].imshow(output[b][0].T)
+                axes[b][1].imshow(packed_prosody[b].cpu()[0].numpy().T)
+            plt.tight_layout()
+            plt.savefig("figures/current_val.png")
+            mse = F.mse_loss(torch.tensor(output), packed_prosody.cpu())
+            # log to wandb
+            wandb_log("val", {
+                "inference_image": wandb.Image(fig),
+                "mse": mse,
+            })
+        elif training_args.train_type == "decoder":
+            (
+                packed_prosody,
+                packed_phones,
+                packed_speaker,
+                packed_mel,
+            ) = next(iter(val_dl))
+            noise = torch.randn(packed_mel.shape).to(packed_mel.device)
+            bsz = packed_mel.shape[0]
+            output = pipeline(
+                packed_phones,
+                packed_speaker,
+                packed_prosody,
+            )
+            fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
+            for b in range(bsz):
+                axes[b][0].imshow(output[b][0].T)
+                axes[b][1].imshow(packed_mel[b].cpu()[0].numpy().T)
+            plt.tight_layout()
+            plt.savefig("figures/current_val.png")
+            mse = F.mse_loss(torch.tensor(output), packed_mel.cpu())
+            # log to wandb
+            wandb_log("val", {
+                "inference_image": wandb.Image(fig),
+                "mse": mse,
+            })
     evaluate_loss_only()
 
 
 def evaluate_loss_only():
     model.eval()
+    losses = []
+    with torch.no_grad():
+        for batch in val_dl:
+            if training_args.train_type == "encoder":
+                packed_prosody, packed_phones, packed_speaker, packed_mask = batch
+                print(packed_prosody.min(), packed_prosody.max())
+                noise = torch.randn(packed_prosody.shape).to(packed_prosody.device)
+                bsz = packed_prosody.shape[0]
+                timesteps = torch.randint(
+                    0,
+                    noise_scheduler.config.num_train_timesteps,
+                    (bsz,),
+                    device=packed_prosody.device,
+                ).long()
+                noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
+                output = model(noisy_, timesteps, packed_phones, packed_speaker)
+                loss = F.mse_loss(output, packed_prosody)
+            elif training_args.train_type == "decoder":
+                (
+                    packed_prosody,
+                    packed_phones,
+                    packed_speaker,
+                    packed_mel,
+                    packed_mask,
+                ) = batch
+                noise = torch.randn(packed_mel.shape).to(packed_mel.device)
+                bsz = packed_mel.shape[0]
+                timesteps = torch.randint(
+                    0,
+                    noise_scheduler.config.num_train_timesteps,
+                    (bsz,),
+                    device=packed_mel.device,
+                ).long()
+                noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
+                output = model(
+                    noisy_,
+                    timesteps,
+                    packed_phones,
+                    packed_speaker,
+                    packed_prosody,
+                )
+                loss = F.mse_loss(output, packed_mel)
+            losses.append(loss.detach())
+    loss = torch.mean(torch.tensor(losses)).item()
+    wandb_log("val", {"loss": loss})
 
 
 def main():
-    global accelerator, training_args, model_args, collator_args, train_dl, val_dl, optimizer, scheduler, model, global_step, pbar, scheduler, pipeline
+    global accelerator, training_args, model_args, collator_args, train_dl, val_dl, optimizer, scheduler, model, global_step, pbar, noise_scheduler
 
     global_step = 0
 
@@ -278,6 +387,11 @@ def main():
     else:
         raise ValueError(f"train_type {training_args.train_type} not supported")
 
+    if training_args.train_type == "encoder":
+        pack_factor = collator_args.enc_pack_factor
+    elif training_args.train_type == "decoder":
+        pack_factor = collator_args.dec_pack_factor
+
     # check if run name is specified
     if training_args.run_name is None:
         raise ValueError("run_name must be specified")
@@ -321,7 +435,7 @@ def main():
     # model
     model = UNet2DConditionModel(model_args)
     console_rule("Model")
-    print_and_draw_model()
+    print_and_draw_model(pack_factor)
 
     # dataset
     console_rule("Dataset")
@@ -367,6 +481,7 @@ def main():
         first_batch = collator([train_ds[i] for i in range(training_args.batch_size)])
         plot_first_batch(first_batch, training_args, collator_args)
         plt.savefig("figures/first_batch.png")
+        plt.close()
 
     # dataloader
     train_dl = DataLoader(
@@ -397,12 +512,11 @@ def main():
     else:
         raise NotImplementedError(f"{training_args.lr_schedule} not implemented")
 
-    scheduler = DDPMScheduler(
+    noise_scheduler = DDPMScheduler(
         num_train_timesteps=training_args.ddpm_num_steps,
         beta_schedule=training_args.ddpm_beta_schedule,
         timestep_spacing="linspace",
     )
-    pipeline = DDPMPipeline(model, scheduler, model_type=training_args.train_type)
 
     # accelerator
     model, optimizer, train_dl, val_dl, scheduler = accelerator.prepare(
@@ -423,14 +537,16 @@ def main():
     training_args.n_epochs = training_args.n_steps // len(train_dl) + 1
     console_print(f"[green]n_epochs[/green]: {training_args.n_epochs}")
     console_print(
-        f"[green]effective_batch_size[/green]: {training_args.batch_size*accelerator.num_processes}"
+        f"[green]effective_batch_size[/green]: {training_args.batch_size*accelerator.num_processes//pack_factor}"
     )
     pbar = tqdm(total=pbar_total, desc="step")
     for i in range(training_args.n_epochs):
         train_epoch(i)
     console_rule("Evaluation")
     seed_everything(training_args.seed)
-    evaluate()
+
+    if accelerator.is_main_process:
+        evaluate()
 
     # save final model
     console_rule("Saving")

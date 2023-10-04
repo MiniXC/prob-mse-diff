@@ -75,14 +75,14 @@ class UNet2DConditionModel(nn.Module):
         )
 
         if args.model_type == "encoder":
-            self.phone_embedding = nn.Embedding(100, args.block_out_channels[0])
+            self.phone_embedding = nn.Embedding(args.num_phones, args.block_out_channels[0])
             self.speaker_embedding = nn.Sequential(
                 nn.Linear(256, args.block_out_channels[0]),
                 nn.GELU(),
                 nn.Linear(args.block_out_channels[0], args.block_out_channels[0]),
             )
         elif args.model_type == "decoder":
-            self.phone_embedding = nn.Embedding(100, args.block_out_channels[0])
+            self.phone_embedding = nn.Embedding(args.num_phones, args.block_out_channels[0])
             self.phone_embedding_mid = nn.Embedding(100, args.block_out_channels[-1])
             self.speaker_embedding = nn.Sequential(
                 nn.Linear(256, args.block_out_channels[0]),
@@ -347,8 +347,6 @@ class UNet2DConditionModel(nn.Module):
 
         if self.args.model_type == "encoder":
             phone_emb = self.phone_embedding(phone_cond)
-            print(speaker_cond.shape, "speaker_cond")
-            print(speaker_cond.device, "speaker_cond.device")
             speaker_emb = self.speaker_embedding(speaker_cond)
             cond = phone_emb + speaker_emb
         elif self.args.model_type == "decoder":
@@ -359,13 +357,11 @@ class UNet2DConditionModel(nn.Module):
 
         cond = cond.transpose(1, 2).unsqueeze(-1)
 
-        print(t_emb.shape, "t_emb.shape")
         emb = self.time_embedding(t_emb, None)
 
         if self.time_embed_act is not None:
             emb = self.time_embed_act(emb)
 
-        print(sample.shape, "sample.shape")
         sample = self.conv_in(sample)
 
         sample = sample + cond
@@ -385,7 +381,6 @@ class UNet2DConditionModel(nn.Module):
                     encoder_attention_mask=encoder_attention_mask,
                 )
             else:
-                print("downsample_block input", sample.shape, emb.shape)
                 sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
 
             down_block_res_samples += res_samples

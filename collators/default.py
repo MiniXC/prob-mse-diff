@@ -61,6 +61,9 @@ class EncoderCollator:
         packed_speaker = torch.zeros(
             len(speaker) // self.pack_factor, self.max_length, speaker[0].shape[1]
         )
+        packed_mask = torch.zeros(
+            len(prosody) // self.pack_factor, self.max_length
+        ).bool()
         num_cut = 0
         num_pad = 0
         for i in range(len(prosody) // self.pack_factor):
@@ -76,6 +79,9 @@ class EncoderCollator:
             pack_arrs_speaker += [
                 speaker[-(i + j + 1)] for j in range(self.pack_factor // 2)
             ]
+            pack_arrs_mask = [
+                np.ones(arr.shape[0], dtype=np.bool) for arr in pack_arrs_prosody
+            ]
             current_len = 0
             for j, arr in enumerate(pack_arrs_prosody):
                 if current_len + arr.shape[0] > self.max_length:
@@ -88,6 +94,9 @@ class EncoderCollator:
                         arr_phones.astype(np.int32)
                     )
                     packed_speaker[i, current_len:, :] = torch.from_numpy(arr_speaker)
+                    packed_mask[i, current_len:] = torch.from_numpy(
+                        pack_arrs_mask[j][:-cut_last_by]
+                    )
                     num_cut += cut_last_by
                     current_len = self.max_length
                     break
@@ -101,6 +110,9 @@ class EncoderCollator:
                     packed_speaker[
                         i, current_len : (current_len + arr.shape[0]), :
                     ] = torch.from_numpy(pack_arrs_speaker[j])
+                    packed_mask[
+                        i, current_len : (current_len + arr.shape[0])
+                    ] = torch.from_numpy(pack_arrs_mask[j])
                     current_len += arr.shape[0]
             num_pad += self.max_length - current_len
         pct_cut = num_cut / (self.max_length * len(prosody) // self.pack_factor)
@@ -108,14 +120,14 @@ class EncoderCollator:
         if self.verbose:
             print(f"Cut {pct_cut:.2%} of the data")
             print(f"Pad {pct_pad:.2%} of the data")
-        return packed_prosody, packed_phones, packed_speaker
+        return packed_prosody, packed_phones, packed_speaker, packed_mask
 
     def __call__(self, batch):
         items = [EncoderCollator.item_to_arrays(item) for item in batch]
         prosody, phones, speaker = zip(*items)
         pack_sequence = np.random.rand() > 0.05
         if pack_sequence:
-            packed_prosody, packed_phones, packed_speaker = self.pack(
+            packed_prosody, packed_phones, packed_speaker, packed_mask = self.pack(
                 prosody, phones, speaker
             )
         else:
@@ -129,20 +141,26 @@ class EncoderCollator:
             packed_speaker = torch.zeros(
                 len(speaker) // self.pack_factor, self.max_length, speaker[0].shape[1]
             )
+            packed_mask = torch.zeros(
+                len(prosody) // self.pack_factor, self.max_length
+            ).bool()
             for i in range(len(prosody) // self.pack_factor):
                 first_arr_prosody = prosody[i]
                 first_arr_phones = phones[i]
                 first_arr_speaker = speaker[i]
+                first_arr_mask = np.ones(first_arr_prosody.shape[0], dtype=np.bool)
                 first_len = first_arr_prosody.shape[0]
                 if first_len > self.max_length:
                     first_arr_prosody = first_arr_prosody[: self.max_length]
                     first_arr_phones = first_arr_phones[: self.max_length]
                     first_arr_speaker = first_arr_speaker[: self.max_length]
+                    first_arr_mask = first_arr_mask[: self.max_length]
                     packed_prosody[i, :, :] = torch.from_numpy(first_arr_prosody)
                     packed_phones[i, :] = torch.from_numpy(
                         first_arr_phones.astype(np.int32)
                     )
                     packed_speaker[i, :, :] = torch.from_numpy(first_arr_speaker)
+                    packed_mask[i, :] = torch.from_numpy(first_arr_mask)
                 else:
                     packed_prosody[i, :first_len, :] = torch.from_numpy(
                         first_arr_prosody
@@ -153,8 +171,10 @@ class EncoderCollator:
                     packed_speaker[i, :first_len, :] = torch.from_numpy(
                         first_arr_speaker
                     )
+                    packed_mask[i, :first_len] = torch.from_numpy(first_arr_mask)
         packed_prosody = packed_prosody.unsqueeze(1)
-        return packed_prosody, packed_phones, packed_speaker
+        packed_mask = packed_mask.unsqueeze(1)
+        return packed_prosody, packed_phones, packed_speaker, packed_mask
 
 
 class DecoderCollator:
@@ -202,6 +222,9 @@ class DecoderCollator:
         packed_mel = torch.zeros(
             len(mel) // self.pack_factor, self.max_length, mel[0].shape[1]
         )
+        packed_mask = torch.zeros(
+            len(prosody) // self.pack_factor, self.max_length
+        ).bool()
         num_cut = 0
         num_pad = 0
         for i in range(len(prosody) // self.pack_factor):
@@ -219,6 +242,9 @@ class DecoderCollator:
             ]
             pack_arrs_mel = [mel[i + j] for j in range(self.pack_factor // 2)]
             pack_arrs_mel += [mel[-(i + j + 1)] for j in range(self.pack_factor // 2)]
+            pack_arrs_mask = [
+                np.ones(arr.shape[0], dtype=np.bool) for arr in pack_arrs_mel
+            ]
             current_len = 0
             for j, arr in enumerate(pack_arrs_prosody):
                 if current_len + arr.shape[0] > self.max_length:
@@ -233,6 +259,9 @@ class DecoderCollator:
                     )
                     packed_speaker[i, current_len:, :] = torch.from_numpy(arr_speaker)
                     packed_mel[i, current_len:, :] = torch.from_numpy(arr_mel)
+                    packed_mask[i, current_len:] = torch.from_numpy(
+                        pack_arrs_mask[j][:-cut_last_by]
+                    )
                     num_cut += cut_last_by
                     current_len = self.max_length
                     break
@@ -249,6 +278,9 @@ class DecoderCollator:
                     packed_mel[
                         i, current_len : (current_len + arr.shape[0]), :
                     ] = torch.from_numpy(pack_arrs_mel[j])
+                    packed_mask[
+                        i, current_len : (current_len + arr.shape[0])
+                    ] = torch.from_numpy(pack_arrs_mask[j])
                     current_len += arr.shape[0]
             num_pad += self.max_length - current_len
         pct_cut = num_cut / (self.max_length * len(prosody) // self.pack_factor)
@@ -256,14 +288,14 @@ class DecoderCollator:
         if self.verbose:
             print(f"Cut {pct_cut:.2%} of the data")
             print(f"Pad {pct_pad:.2%} of the data")
-        return packed_prosody, packed_phones, packed_speaker, packed_mel
+        return packed_prosody, packed_phones, packed_speaker, packed_mel, packed_mask
 
     def __call__(self, batch):
         items = [DecoderCollator.item_to_arrays(item) for item in batch]
         prosody, phones, speaker, mel = zip(*items)
         pack_sequence = np.random.rand() > 0.05
         if pack_sequence:
-            packed_prosody, packed_phones, packed_speaker, packed_mel = self.pack(
+            packed_prosody, packed_phones, packed_speaker, packed_mel, packed_mask = self.pack(
                 prosody, phones, speaker, mel
             )
         else:
@@ -280,23 +312,29 @@ class DecoderCollator:
             packed_mel = torch.zeros(
                 len(mel) // self.pack_factor, self.max_length, mel[0].shape[1]
             )
+            packed_mask = torch.zeros(
+                len(prosody) // self.pack_factor, self.max_length
+            ).bool()
             for i in range(len(prosody) // self.pack_factor):
                 first_arr_prosody = prosody[i]
                 first_arr_phones = phones[i]
                 first_arr_speaker = speaker[i]
                 first_arr_mel = mel[i]
+                first_arr_mask = np.ones(first_arr_mel.shape[0], dtype=np.bool)
                 first_len = first_arr_prosody.shape[0]
                 if first_len > self.max_length:
                     first_arr_prosody = first_arr_prosody[: self.max_length]
                     first_arr_phones = first_arr_phones[: self.max_length]
                     first_arr_speaker = first_arr_speaker[: self.max_length]
                     first_arr_mel = first_arr_mel[: self.max_length]
+                    first_arr_mask = first_arr_mask[: self.max_length]
                     packed_prosody[i, :, :] = torch.from_numpy(first_arr_prosody)
                     packed_phones[i, :] = torch.from_numpy(
                         first_arr_phones.astype(np.int32)
                     )
                     packed_speaker[i, :, :] = torch.from_numpy(first_arr_speaker)
                     packed_mel[i, :, :] = torch.from_numpy(first_arr_mel)
+                    packed_mask[i, :] = torch.from_numpy(first_arr_mask)
                 else:
                     packed_prosody[i, :first_len, :] = torch.from_numpy(
                         first_arr_prosody
@@ -308,5 +346,7 @@ class DecoderCollator:
                         first_arr_speaker
                     )
                     packed_mel[i, :first_len, :] = torch.from_numpy(first_arr_mel)
+                    packed_mask[i, :first_len] = torch.from_numpy(first_arr_mask)
         packed_mel = packed_mel.unsqueeze(1)
-        return packed_prosody, packed_phones, packed_speaker, packed_mel
+        packed_mask = packed_mask.unsqueeze(1)
+        return packed_prosody, packed_phones, packed_speaker, packed_mel, packed_mask
