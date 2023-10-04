@@ -26,7 +26,7 @@ class TrainingArgs:
     do_save: bool = False
     save_onx: bool = False
     eval_only: bool = False
-    eval_every_n_steps: int = 1000
+    eval_every_n_steps: int = 10
     save_every_n_steps: int = 10000
     push_to_hub: bool = False
     hub_repo: str = None

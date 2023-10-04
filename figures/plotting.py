@@ -7,7 +7,12 @@ def plot_first_batch(batch, args: TrainingArgs, collator_args):
     if args.train_type == "encoder":
         fig, axes = plt.subplots(nrows=4, ncols=1, figsize=(10, 10))
         prosody = (
-            batch[0].squeeze(1).transpose(0, 1).reshape(collator_args.enc_max_length, -1).numpy().T
+            batch[0]
+            .squeeze(1)
+            .transpose(0, 1)
+            .reshape(collator_args.enc_max_length, -1)
+            .numpy()
+            .T
         )
         phones = (
             batch[1].transpose(0, 1).reshape(collator_args.enc_max_length, -1).numpy().T
@@ -16,7 +21,12 @@ def plot_first_batch(batch, args: TrainingArgs, collator_args):
             batch[2].transpose(0, 1).reshape(collator_args.enc_max_length, -1).numpy().T
         )
         mask = (
-            batch[3].transpose(0, 1).reshape(collator_args.enc_max_length, -1).numpy().T
+            batch[3]
+            .squeeze(1)
+            .transpose(0, 1)
+            .reshape(collator_args.enc_max_length, -1)
+            .numpy()
+            .T
         )
         axes[0].imshow(prosody, aspect="auto")
         axes[1].imshow(phones, aspect="auto")
@@ -38,10 +48,20 @@ def plot_first_batch(batch, args: TrainingArgs, collator_args):
             batch[2].transpose(0, 1).reshape(collator_args.dec_max_length, -1).numpy().T
         )
         mel = (
-            batch[3].squeeze(1).transpose(0, 1).reshape(collator_args.dec_max_length, -1).numpy().T
+            batch[3]
+            .squeeze(1)
+            .transpose(0, 1)
+            .reshape(collator_args.dec_max_length, -1)
+            .numpy()
+            .T
         )
         mask = (
-            batch[4].transpose(0, 1).reshape(collator_args.dec_max_length, -1).numpy().T
+            batch[4]
+            .squeeze(1)
+            .transpose(0, 1)
+            .reshape(collator_args.dec_max_length, -1)
+            .numpy()
+            .T
         )
         axes[0].imshow(prosody, aspect="auto")
         axes[1].imshow(phones, aspect="auto")

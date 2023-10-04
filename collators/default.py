@@ -10,10 +10,11 @@ WAVELET_WIDTHS = np.arange(1, 10, 1)
 
 
 class EncoderCollator:
-    def __init__(self, args: EncoderCollatorArgs):
+    def __init__(self, args: EncoderCollatorArgs, inference=False):
         self.max_length = args.enc_max_length
         self.pack_factor = args.enc_pack_factor
         self.verbose = args.enc_verbose
+        self.inference = inference
 
     @staticmethod
     def compute_cwt(duration_array):
@@ -126,6 +127,7 @@ class EncoderCollator:
         items = [EncoderCollator.item_to_arrays(item) for item in batch]
         prosody, phones, speaker = zip(*items)
         pack_sequence = np.random.rand() > 0.05
+        pack_sequence = pack_sequence and not self.inference
         if pack_sequence:
             packed_prosody, packed_phones, packed_speaker, packed_mask = self.pack(
                 prosody, phones, speaker
@@ -178,10 +180,11 @@ class EncoderCollator:
 
 
 class DecoderCollator:
-    def __init__(self, args: DecoderCollatorArgs):
+    def __init__(self, args: DecoderCollatorArgs, inference=False):
         self.max_length = args.dec_max_length
         self.pack_factor = args.dec_pack_factor
         self.verbose = args.dec_verbose
+        self.inference = inference
 
     @staticmethod
     def item_to_arrays(item):
@@ -294,10 +297,15 @@ class DecoderCollator:
         items = [DecoderCollator.item_to_arrays(item) for item in batch]
         prosody, phones, speaker, mel = zip(*items)
         pack_sequence = np.random.rand() > 0.05
+        pack_sequence = pack_sequence and not self.inference
         if pack_sequence:
-            packed_prosody, packed_phones, packed_speaker, packed_mel, packed_mask = self.pack(
-                prosody, phones, speaker, mel
-            )
+            (
+                packed_prosody,
+                packed_phones,
+                packed_speaker,
+                packed_mel,
+                packed_mask,
+            ) = self.pack(prosody, phones, speaker, mel)
         else:
             # use the first half of the batch and pad to self.max_length
             packed_prosody = torch.zeros(

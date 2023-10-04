@@ -95,7 +95,9 @@ def wandb_log(prefix, log_dict, round_n=3, print_log=True):
         log_dict = {f"{prefix}/{k}": v for k, v in log_dict.items()}
         wandb.log(log_dict, step=global_step)
         if print_log:
-            log_dict = {k: round(v, round_n) for k, v in log_dict.items() if "image" not in k}
+            log_dict = {
+                k: round(v, round_n) for k, v in log_dict.items() if "image" not in k
+            }
             console.log(log_dict)
 
 
@@ -112,9 +114,7 @@ def save_checkpoint(name_override=None):
         name = name_override
     else:
         name = f"step_{global_step}"
-    checkpoint_path = (
-        Path(training_args.checkpoint_path) / checkpoint_name / name
-    )
+    checkpoint_path = Path(training_args.checkpoint_path) / checkpoint_name / name
     if name_override is None:
         # remove old checkpoints
         if checkpoint_path.exists():
@@ -160,7 +160,9 @@ def train_epoch(epoch):
                 ).long()
                 noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
                 output = model(noisy_, timesteps, packed_phones, packed_speaker)
-                loss = F.mse_loss(output, packed_prosody)
+                loss = F.mse_loss(output, packed_prosody, reduction="none")
+                loss = loss * packed_mask.unsqueeze(-1)
+                loss = loss.sum() / packed_mask.sum()
             elif training_args.train_type == "decoder":
                 (
                     packed_prosody,
@@ -185,6 +187,9 @@ def train_epoch(epoch):
                     packed_speaker,
                     packed_prosody,
                 )
+                loss = F.mse_loss(output, packed_mel, reduction="none")
+                loss = loss * packed_mask.unsqueeze(-1)
+                loss = loss.sum() / packed_mask.sum()
             accelerator.backward(loss)
             accelerator.clip_grad_norm_(
                 model.parameters(), training_args.gradient_clip_val
@@ -237,12 +242,12 @@ def evaluate():
         beta_schedule=training_args.ddpm_beta_schedule,
         timestep_spacing="linspace",
     )
-    pipeline = DDPMPipeline(
-        eval_model, eval_noise_scheduler, model_args, device="cpu"
-    )
+    pipeline = DDPMPipeline(eval_model, eval_noise_scheduler, model_args, device="cpu")
     with torch.no_grad():
         if training_args.train_type == "encoder":
-            packed_prosody, packed_phones, packed_speaker = next(iter(val_dl))
+            packed_prosody, packed_phones, packed_speaker, packed_mask = next(
+                iter(val_dl)
+            )
             noise = torch.randn(packed_prosody.shape).to(packed_prosody.device)
             bsz = packed_prosody.shape[0]
             output = pipeline(packed_phones, packed_speaker)
@@ -254,16 +259,20 @@ def evaluate():
             plt.savefig("figures/current_val.png")
             mse = F.mse_loss(torch.tensor(output), packed_prosody.cpu())
             # log to wandb
-            wandb_log("val", {
-                "inference_image": wandb.Image(fig),
-                "mse": mse,
-            })
+            wandb_log(
+                "val",
+                {
+                    "inference_image": wandb.Image(fig),
+                    "mse": mse.item(),
+                },
+            )
         elif training_args.train_type == "decoder":
             (
                 packed_prosody,
                 packed_phones,
                 packed_speaker,
                 packed_mel,
+                packed_mask,
             ) = next(iter(val_dl))
             noise = torch.randn(packed_mel.shape).to(packed_mel.device)
             bsz = packed_mel.shape[0]
@@ -280,10 +289,13 @@ def evaluate():
             plt.savefig("figures/current_val.png")
             mse = F.mse_loss(torch.tensor(output), packed_mel.cpu())
             # log to wandb
-            wandb_log("val", {
-                "inference_image": wandb.Image(fig),
-                "mse": mse,
-            })
+            wandb_log(
+                "val",
+                {
+                    "inference_image": wandb.Image(fig),
+                    "mse": mse.item(),
+                },
+            )
     evaluate_loss_only()
 
 
@@ -291,10 +303,9 @@ def evaluate_loss_only():
     model.eval()
     losses = []
     with torch.no_grad():
-        for batch in val_dl:
+        for batch in tqdm(val_dl, desc="val"):
             if training_args.train_type == "encoder":
                 packed_prosody, packed_phones, packed_speaker, packed_mask = batch
-                print(packed_prosody.min(), packed_prosody.max())
                 noise = torch.randn(packed_prosody.shape).to(packed_prosody.device)
                 bsz = packed_prosody.shape[0]
                 timesteps = torch.randint(
@@ -330,7 +341,7 @@ def evaluate_loss_only():
                     packed_speaker,
                     packed_prosody,
                 )
-                loss = F.mse_loss(output, packed_mel)
+                loss = F.mse_loss(output, packed_mel).item().numpy()
             losses.append(loss.detach())
     loss = torch.mean(torch.tensor(losses)).item()
     wandb_log("val", {"loss": loss})
@@ -475,6 +486,8 @@ def main():
 
     # collator
     collator = get_collator(training_args, collator_args)
+    collator_val = get_collator(training_args, collator_args)
+    collator_val.inference = True
 
     # plot first batch
     if accelerator.is_main_process:
@@ -496,7 +509,7 @@ def main():
         val_ds,
         batch_size=training_args.batch_size,
         shuffle=False,
-        collate_fn=collator,
+        collate_fn=collator_val,
     )
 
     # optimizer
