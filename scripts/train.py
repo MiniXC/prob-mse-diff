@@ -217,7 +217,6 @@ def train_epoch(epoch):
             training_args.eval_every_n_steps is not None
             and global_step > 0
             and global_step % training_args.eval_every_n_steps == 0
-            and accelerator.is_main_process
         ):
             if training_args.do_full_eval:
                 evaluate()
@@ -235,68 +234,71 @@ def train_epoch(epoch):
 def evaluate():
     # pass the first batch through the pipeline
     checkpoint_path = save_checkpoint("temp")
-    eval_model = UNet2DConditionModel(model_args)
-    eval_model.from_pretrained(checkpoint_path)
-    eval_noise_scheduler = DDPMScheduler(
-        num_train_timesteps=training_args.ddpm_num_steps_inference,
-        beta_schedule=training_args.ddpm_beta_schedule,
-        timestep_spacing="linspace",
-    )
-    pipeline = DDPMPipeline(eval_model, eval_noise_scheduler, model_args, device="cpu")
-    with torch.no_grad():
-        if training_args.train_type == "encoder":
-            packed_prosody, packed_phones, packed_speaker, packed_mask = next(
-                iter(val_dl)
-            )
-            noise = torch.randn(packed_prosody.shape).to(packed_prosody.device)
-            bsz = packed_prosody.shape[0]
-            output = pipeline(packed_phones, packed_speaker)
-            fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
-            for b in range(bsz):
-                axes[b][0].imshow(output[b][0].T)
-                axes[b][1].imshow(packed_prosody[b].cpu()[0].numpy().T)
-            plt.tight_layout()
-            plt.savefig("figures/current_val.png")
-            mse = F.mse_loss(torch.tensor(output), packed_prosody.cpu())
-            # log to wandb
-            wandb_log(
-                "val",
-                {
-                    "inference_image": wandb.Image(fig),
-                    "mse": mse.item(),
-                },
-            )
-        elif training_args.train_type == "decoder":
-            (
-                packed_prosody,
-                packed_phones,
-                packed_speaker,
-                packed_mel,
-                packed_mask,
-            ) = next(iter(val_dl))
-            noise = torch.randn(packed_mel.shape).to(packed_mel.device)
-            bsz = packed_mel.shape[0]
-            output = pipeline(
-                packed_phones,
-                packed_speaker,
-                packed_prosody,
-            )
-            fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
-            for b in range(bsz):
-                axes[b][0].imshow(output[b][0].T)
-                axes[b][1].imshow(packed_mel[b].cpu()[0].numpy().T)
-            plt.tight_layout()
-            plt.savefig("figures/current_val.png")
-            mse = F.mse_loss(torch.tensor(output), packed_mel.cpu())
-            # log to wandb
-            wandb_log(
-                "val",
-                {
-                    "inference_image": wandb.Image(fig),
-                    "mse": mse.item(),
-                },
-            )
-    evaluate_loss_only()
+    if accelerator.is_main_process:
+        eval_model = UNet2DConditionModel(model_args)
+        eval_model.from_pretrained(checkpoint_path)
+        eval_noise_scheduler = DDPMScheduler(
+            num_train_timesteps=training_args.ddpm_num_steps_inference,
+            beta_schedule=training_args.ddpm_beta_schedule,
+            timestep_spacing="linspace",
+        )
+        pipeline = DDPMPipeline(
+            eval_model, eval_noise_scheduler, model_args, device="cpu"
+        )
+        with torch.no_grad():
+            if training_args.train_type == "encoder":
+                packed_prosody, packed_phones, packed_speaker, packed_mask = next(
+                    iter(val_dl)
+                )
+                bsz = packed_prosody.shape[0]
+                output = pipeline(packed_phones, packed_speaker)
+                output = output * packed_mask.unsqueeze(-1).cpu()
+                fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
+                for b in range(bsz):
+                    axes[b][0].imshow(output[b][0].T)
+                    axes[b][1].imshow(packed_prosody[b].cpu()[0].numpy().T)
+                plt.tight_layout()
+                plt.savefig("figures/current_val.png")
+                mse = F.mse_loss(torch.tensor(output), packed_prosody.cpu())
+                # log to wandb
+                wandb_log(
+                    "val",
+                    {
+                        "inference_image": wandb.Image(fig),
+                        "mse": mse.item(),
+                    },
+                )
+            elif training_args.train_type == "decoder":
+                (
+                    packed_prosody,
+                    packed_phones,
+                    packed_speaker,
+                    packed_mel,
+                    packed_mask,
+                ) = next(iter(val_dl))
+                bsz = packed_mel.shape[0]
+                output = pipeline(
+                    packed_phones,
+                    packed_speaker,
+                    packed_prosody,
+                )
+                output = output * packed_mask.unsqueeze(-1).cpu()
+                fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
+                for b in range(bsz):
+                    axes[b][0].imshow(output[b][0].T)
+                    axes[b][1].imshow(packed_mel[b].cpu()[0].numpy().T)
+                plt.tight_layout()
+                plt.savefig("figures/current_val.png")
+                mse = F.mse_loss(torch.tensor(output), packed_mel.cpu())
+                # log to wandb
+                wandb_log(
+                    "val",
+                    {
+                        "inference_image": wandb.Image(fig),
+                        "mse": mse.item(),
+                    },
+                )
+        evaluate_loss_only()
 
 
 def evaluate_loss_only():
@@ -558,8 +560,7 @@ def main():
     console_rule("Evaluation")
     seed_everything(training_args.seed)
 
-    if accelerator.is_main_process:
-        evaluate()
+    evaluate()
 
     # save final model
     console_rule("Saving")

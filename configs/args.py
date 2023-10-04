@@ -12,12 +12,12 @@ class TrainingArgs:
     output_path: str = "outputs"
     run_name: str = None
     wandb_mode: str = "offline"
-    wandb_project: str = None
+    wandb_project: str = "protts"
     wandb_dir: str = "wandb"
     train_split: str = "train.other.500+train.clean.360+train.clean.100"
     speakers_in_validation: int = 100
     unseen_validation_split: str = "dev.other+dev.clean+test.other+test.clean"
-    n_steps: int = 100000
+    n_steps: int = 500000
     batch_size: int = 32
     seed: int = 0
     dataset: str = "cdminix/librispeech-phones-and-mel"
@@ -26,7 +26,7 @@ class TrainingArgs:
     do_save: bool = False
     save_onx: bool = False
     eval_only: bool = False
-    eval_every_n_steps: int = 10
+    eval_every_n_steps: int = 5000
     save_every_n_steps: int = 10000
     push_to_hub: bool = False
     hub_repo: str = None

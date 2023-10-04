@@ -75,14 +75,18 @@ class UNet2DConditionModel(nn.Module):
         )
 
         if args.model_type == "encoder":
-            self.phone_embedding = nn.Embedding(args.num_phones, args.block_out_channels[0])
+            self.phone_embedding = nn.Embedding(
+                args.num_phones, args.block_out_channels[0]
+            )
             self.speaker_embedding = nn.Sequential(
                 nn.Linear(256, args.block_out_channels[0]),
                 nn.GELU(),
                 nn.Linear(args.block_out_channels[0], args.block_out_channels[0]),
             )
         elif args.model_type == "decoder":
-            self.phone_embedding = nn.Embedding(args.num_phones, args.block_out_channels[0])
+            self.phone_embedding = nn.Embedding(
+                args.num_phones, args.block_out_channels[0]
+            )
             self.phone_embedding_mid = nn.Embedding(100, args.block_out_channels[-1])
             self.speaker_embedding = nn.Sequential(
                 nn.Linear(256, args.block_out_channels[0]),
