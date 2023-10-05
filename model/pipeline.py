@@ -1,7 +1,7 @@
 import torch
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.utils.torch_utils import randn_tensor
-import copy
+import imageio
 
 
 class DDPMPipeline(DiffusionPipeline):
@@ -39,6 +39,7 @@ class DDPMPipeline(DiffusionPipeline):
         speaker_cond_temporal=None,
         batch_size=1,
         generator=None,
+        mask=None,
     ):
         if isinstance(self.model_args.sample_size, int):
             image_shape = (
@@ -56,20 +57,25 @@ class DDPMPipeline(DiffusionPipeline):
 
         image = randn_tensor(image_shape, device=self._device, generator=generator)
 
+        all_images = []
+
         self.scheduler.set_timesteps(self.timesteps, device=self._device)
+
+        image = image.to(self._device)
+        phone_cond = phone_cond.to(self._device)
+        speaker_cond = speaker_cond.to(self._device)
+        if prosody_cond is not None:
+            prosody_cond = prosody_cond.to(self._device)
+        if speaker_cond_temporal is not None:
+            speaker_cond_temporal = speaker_cond_temporal.to(self._device)
+        mask = mask.to(self._device)
 
         for t in self.progress_bar(self.scheduler.timesteps):
             # 1. predict noise model_output
-            image = image.to(self._device)
-            phone_cond = phone_cond.to(self._device)
-            speaker_cond = speaker_cond.to(self._device)
-            if prosody_cond is not None:
-                prosody_cond = prosody_cond.to(self._device)
-            if speaker_cond_temporal is not None:
-                speaker_cond_temporal = speaker_cond_temporal.to(self._device)
             if self.model_args.model_type == "encoder":
                 model_output = self.unet(
                     image,
+                    mask,
                     t,
                     phone_cond,
                     speaker_cond,
@@ -77,6 +83,7 @@ class DDPMPipeline(DiffusionPipeline):
             elif self.model_args.model_type == "decoder":
                 model_output = self.unet(
                     image,
+                    mask,
                     t,
                     phone_cond,
                     speaker_cond,
@@ -84,10 +91,25 @@ class DDPMPipeline(DiffusionPipeline):
                     speaker_cond_temporal,
                 )
 
+            print(image[mask].min(), image[mask].max())
+
             # 2. compute previous image: x_t -> x_t-1
             image = self.scheduler.step(
                 model_output, t, image, generator=generator
             ).prev_sample
+
+            gif_image = image.clone().detach().cpu()[0]
+            # min-max normalize
+            gif_image = (gif_image - gif_image.min()) / (
+                gif_image.max() - gif_image.min()
+            )
+            gif_image = (gif_image * 255).type(torch.uint8)
+            gif_image = gif_image.squeeze(0).T
+            # flip y axis
+            gif_image = gif_image.flip(0)
+            all_images.append(gif_image)
+
+        imageio.mimsave("figures/diffusion_process.gif", all_images, duration=0.05)
 
         image = image.cpu()
 

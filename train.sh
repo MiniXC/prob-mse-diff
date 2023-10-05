@@ -1,2 +1,1 @@
-python scripts/train.py --run_name encoder_baseline --eval_only --load_from_checkpoint checkpoints/encoder_baseline_diff/step_20000
-#accelerate launch scripts/train.py --run_name encoder_baseline_diff --do_save --wandb_mode online
+accelerate launch scripts/train.py --run_name encoder_baseline_diff_fixed3 --do_save --wandb_mode online

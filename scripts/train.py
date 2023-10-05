@@ -10,6 +10,7 @@ import torch
 from torch.utils.data import DataLoader
 from accelerate import Accelerator
 from transformers import get_linear_schedule_with_warmup, HfArgumentParser
+from diffusers.optimization import get_scheduler
 from datasets import load_dataset
 import torch.nn.functional as F
 
@@ -159,10 +160,12 @@ def train_epoch(epoch):
                     device=packed_prosody.device,
                 ).long()
                 noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
-                output = model(noisy_, timesteps, packed_phones, packed_speaker)
-                loss = F.mse_loss(output, packed_prosody, reduction="none")
+                output = model(
+                    noisy_, packed_mask, timesteps, packed_phones, packed_speaker
+                )
+                loss = F.mse_loss(output, noise, reduction="none")
                 loss = loss * packed_mask.unsqueeze(-1)
-                loss = loss.sum() / packed_mask.sum()
+                loss = loss.sum() / packed_mask.sum() / model_args.sample_size[-1]
             elif training_args.train_type == "decoder":
                 (
                     packed_prosody,
@@ -182,14 +185,15 @@ def train_epoch(epoch):
                 noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
                 output = model(
                     noisy_,
+                    packed_mask,
                     timesteps,
                     packed_phones,
                     packed_speaker,
                     packed_prosody,
                 )
-                loss = F.mse_loss(output, packed_mel, reduction="none")
+                loss = F.mse_loss(output, noise, reduction="none")
                 loss = loss * packed_mask.unsqueeze(-1)
-                loss = loss.sum() / packed_mask.sum()
+                loss = loss.sum() / packed_mask.sum() / model_args.sample_size[-1]
             accelerator.backward(loss)
             accelerator.clip_grad_norm_(
                 model.parameters(), training_args.gradient_clip_val
@@ -250,14 +254,17 @@ def evaluate():
                     iter(val_dl)
                 )
                 bsz = packed_prosody.shape[0]
-                output = pipeline(packed_phones, packed_speaker, batch_size=bsz)
-                output = output * packed_mask.unsqueeze(-1).cpu()
+                output = pipeline(
+                    packed_phones, packed_speaker, batch_size=bsz, mask=packed_mask
+                )
+                # output = output * packed_mask.unsqueeze(-1).cpu()
                 fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
                 for b in range(bsz):
                     axes[b][0].imshow(output[b][0].T)
                     axes[b][1].imshow(packed_prosody[b].cpu()[0].numpy().T)
                 plt.tight_layout()
                 plt.savefig("figures/current_val.png")
+                plt.close()
                 mse = F.mse_loss(torch.tensor(output), packed_prosody.cpu())
                 # log to wandb
                 wandb_log(
@@ -281,14 +288,16 @@ def evaluate():
                     packed_speaker,
                     packed_prosody,
                     batch_size=bsz,
+                    mask=packed_mask,
                 )
-                output = output * packed_mask.unsqueeze(-1).cpu()
+                # output = output * packed_mask.unsqueeze(-1).cpu()
                 fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
                 for b in range(bsz):
                     axes[b][0].imshow(output[b][0].T)
                     axes[b][1].imshow(packed_mel[b].cpu()[0].numpy().T)
                 plt.tight_layout()
                 plt.savefig("figures/current_val.png")
+                plt.close()
                 mse = F.mse_loss(torch.tensor(output), packed_mel.cpu())
                 # log to wandb
                 wandb_log(
@@ -305,7 +314,7 @@ def evaluate_loss_only():
     model.eval()
     losses = []
     with torch.no_grad():
-        for batch in tqdm(val_dl, desc="val"):
+        for i, batch in tqdm(enumerate(val_dl), desc="val"):
             if training_args.train_type == "encoder":
                 packed_prosody, packed_phones, packed_speaker, packed_mask = batch
                 noise = torch.randn(packed_prosody.shape).to(packed_prosody.device)
@@ -317,10 +326,18 @@ def evaluate_loss_only():
                     device=packed_prosody.device,
                 ).long()
                 noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
-                output = model(noisy_, timesteps, packed_phones, packed_speaker)
-                loss = F.mse_loss(output, packed_prosody, reduction="none")
+                output = model(
+                    noisy_, packed_mask, timesteps, packed_phones, packed_speaker
+                )
+                loss = F.mse_loss(output, noise, reduction="none")
+                if i == 0:
+                    plt.imshow(output[0][0].T.cpu())
+                    plt.savefig("figures/val0.png")
+                    plt.imshow(noise[0][0].T.cpu())
+                    plt.savefig("figures/val1.png")
+                    plt.close()
                 loss = loss * packed_mask.unsqueeze(-1)
-                loss = loss.sum() / packed_mask.sum()
+                loss = loss.sum() / packed_mask.sum() / model_args.sample_size[-1]
             elif training_args.train_type == "decoder":
                 (
                     packed_prosody,
@@ -340,14 +357,20 @@ def evaluate_loss_only():
                 noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
                 output = model(
                     noisy_,
+                    packed_mask,
                     timesteps,
                     packed_phones,
                     packed_speaker,
                     packed_prosody,
                 )
-                loss = F.mse_loss(output, packed_mel, reduction="none")
+                loss = F.mse_loss(output, noise, reduction="none")
+                if i == 0:
+                    plt.imshow(output[0][0].T.cpu())
+                    plt.savefig("figures/val0.png")
+                    plt.imshow(noise[0][0].T.cpu())
+                    plt.savefig("figures/val1.png")
                 loss = loss * packed_mask.unsqueeze(-1)
-                loss = loss.sum() / packed_mask.sum()
+                loss = loss.sum() / packed_mask.sum() / model_args.sample_size[-1]
             losses.append(loss.detach())
     loss = torch.mean(torch.tensor(losses)).item()
     wandb_log("val", {"loss": loss})
@@ -452,7 +475,10 @@ def main():
     # model
     model = UNet2DConditionModel(model_args)
     if training_args.load_from_checkpoint is not None:
-        model.from_pretrained(training_args.load_from_checkpoint)
+        console_print(
+            f"[green]load_from_checkpoint[/green]: {training_args.load_from_checkpoint}"
+        )
+        model = UNet2DConditionModel.from_pretrained(training_args.load_from_checkpoint)
     console_rule("Model")
     print_and_draw_model(pack_factor)
 
@@ -495,7 +521,7 @@ def main():
     # collator
     collator = get_collator(training_args, collator_args)
     collator_val = get_collator(training_args, collator_args)
-    collator_val.inference = True
+    # collator_val.inference = True
 
     # plot first batch
     if accelerator.is_main_process:
@@ -515,7 +541,7 @@ def main():
 
     val_dl = DataLoader(
         val_ds,
-        batch_size=training_args.batch_size,
+        batch_size=training_args.valid_batch_size,
         shuffle=False,
         collate_fn=collator_val,
     )
@@ -530,8 +556,13 @@ def main():
             num_warmup_steps=training_args.lr_warmup_steps,
             num_training_steps=training_args.n_steps,
         )
-    else:
-        raise NotImplementedError(f"{training_args.lr_schedule} not implemented")
+    elif training_args.lr_schedule == "cosine":
+        scheduler = get_scheduler(
+            training_args.lr_schedule,
+            optimizer=optimizer,
+            num_warmup_steps=training_args.lr_warmup_steps,
+            num_training_steps=training_args.n_steps,
+        )
 
     noise_scheduler = DDPMScheduler(
         num_train_timesteps=training_args.ddpm_num_steps,

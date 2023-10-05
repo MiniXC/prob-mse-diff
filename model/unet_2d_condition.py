@@ -317,6 +317,7 @@ class UNet2DConditionModel(nn.Module):
     def forward(
         self,
         sample,
+        sample_mask,
         timesteps,
         phone_cond,
         speaker_cond,
@@ -325,6 +326,7 @@ class UNet2DConditionModel(nn.Module):
         encoder_hidden_states=None,
         encoder_attention_mask=None,
     ):
+        padding_mask = sample_mask.unsqueeze(-1)
         upsample_size = None
 
         if attention_mask is not None:
@@ -367,6 +369,8 @@ class UNet2DConditionModel(nn.Module):
         if self.time_embed_act is not None:
             emb = self.time_embed_act(emb)
 
+        sample = sample * padding_mask
+        cond = cond * padding_mask
         sample = self.conv_in(sample)
         cond = self.conv_in_cond(cond)
 
@@ -441,6 +445,7 @@ class UNet2DConditionModel(nn.Module):
             sample = self.conv_norm_out(sample)
             sample = self.conv_act(sample)
         sample = self.conv_out(sample)
+        sample = sample * padding_mask
 
         return sample
 
@@ -475,6 +480,7 @@ class UNet2DConditionModel(nn.Module):
         if self.args.model_type == "encoder":
             return [
                 torch.randn(1, 1, *self.sample_size),
+                torch.ones(1, 1, self.sample_size[0]),
                 torch.randint(0, 100, (1,)),
                 torch.randint(
                     0,
@@ -489,6 +495,7 @@ class UNet2DConditionModel(nn.Module):
         elif self.args.model_type == "decoder":
             return [
                 torch.randn(1, 1, *self.sample_size),
+                torch.ones(1, 1, self.sample_size[0]),
                 torch.randint(0, 100, (1,)),
                 torch.randn(1, self.sample_size[0], 256),
                 torch.randn(1, self.sample_size[0], 80),

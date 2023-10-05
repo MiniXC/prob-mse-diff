@@ -6,7 +6,7 @@ def validate_args(*args):
         if isinstance(arg, TrainingArgs):
             if arg.dataset not in ["cdminix/librispeech-phones-and-mel"]:
                 raise ValueError(f"dataset {arg.dataset} not supported")
-            if arg.lr_schedule not in ["linear_with_warmup"]:
+            if arg.lr_schedule not in ["linear_with_warmup", "cosine"]:
                 raise ValueError(f"lr_schedule {arg.lr_schedule} not supported")
             if arg.wandb_mode not in ["online", "offline"]:
                 raise ValueError(f"wandb_mode {arg.wandb_mode} not supported")

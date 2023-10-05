@@ -37,7 +37,7 @@ class EncoderCollator:
         speaker = np.array(Image.open(item["speaker_utterance"]))
         prosody = np.concatenate((prosody, cwt_result, speaker), axis=0)
         # to float
-        prosody = (prosody.astype(np.float32) / 255.0 - 0.5).T
+        prosody = (prosody.astype(np.float32) / 255.0).T
         # speaker
         speaker = np.load(item["mean_speaker"])[np.newaxis, :]
         # repeat speaker to match prosody

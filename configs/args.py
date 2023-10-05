@@ -4,9 +4,9 @@ from typing import Optional, Tuple, Union
 
 @dataclass
 class TrainingArgs:
-    lr: float = 5e-5
-    lr_schedule: str = "linear_with_warmup"
-    lr_warmup_steps: int = 1000
+    lr: float = 1e-3
+    lr_schedule: str = "cosine"
+    lr_warmup_steps: int = 500
     gradient_clip_val: float = 1.0
     checkpoint_path: str = "checkpoints"
     output_path: str = "outputs"
@@ -18,8 +18,9 @@ class TrainingArgs:
     train_split: str = "train.other.500+train.clean.360+train.clean.100"
     speakers_in_validation: int = 100
     unseen_validation_split: str = "dev.other+dev.clean+test.other+test.clean"
-    n_steps: int = 500000
+    n_steps: int = 100000
     batch_size: int = 16
+    valid_batch_size: int = 16
     seed: int = 0
     dataset: str = "cdminix/librispeech-phones-and-mel"
     log_every_n_steps: int = 100
@@ -27,14 +28,14 @@ class TrainingArgs:
     do_save: bool = False
     save_onx: bool = False
     eval_only: bool = False
-    eval_every_n_steps: int = 1000
+    eval_every_n_steps: int = 100
     save_every_n_steps: int = 10000
     push_to_hub: bool = False
     hub_repo: str = None
     train_type: str = "encoder"
     ddpm_num_steps: int = 1000
-    ddpm_beta_schedule: str = "linear"
-    ddpm_num_steps_inference: int = 100
+    ddpm_beta_schedule: str = "sigmoid"
+    ddpm_num_steps_inference: int = 10
 
 
 @dataclass
