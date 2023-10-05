@@ -39,7 +39,13 @@ class UNet2DConditionModel(nn.Module):
         conv_in_padding = (args.conv_in_kernel - 1) // 2
         self.conv_in = nn.Conv2d(
             args.in_channels,
-            args.block_out_channels[0],
+            args.block_out_channels[0] // 2,
+            kernel_size=args.conv_in_kernel,
+            padding=conv_in_padding,
+        )
+        self.conv_in_cond = nn.Conv2d(
+            args.in_channels,
+            args.block_out_channels[0] // 2,
             kernel_size=args.conv_in_kernel,
             padding=conv_in_padding,
         )
@@ -75,33 +81,28 @@ class UNet2DConditionModel(nn.Module):
         )
 
         if args.model_type == "encoder":
-            self.phone_embedding = nn.Embedding(
-                args.num_phones, args.block_out_channels[0]
-            )
+            self.phone_embedding = nn.Embedding(args.num_phones, 80)
             self.speaker_embedding = nn.Sequential(
-                nn.Linear(256, args.block_out_channels[0]),
+                nn.Linear(256, 80),
                 nn.GELU(),
-                nn.Linear(args.block_out_channels[0], args.block_out_channels[0]),
+                nn.Linear(80, 80),
             )
         elif args.model_type == "decoder":
-            self.phone_embedding = nn.Embedding(
-                args.num_phones, args.block_out_channels[0]
-            )
-            self.phone_embedding_mid = nn.Embedding(100, args.block_out_channels[-1])
+            self.phone_embedding = nn.Embedding(args.num_phones, 80)
             self.speaker_embedding = nn.Sequential(
-                nn.Linear(256, args.block_out_channels[0]),
+                nn.Linear(256, 80),
                 nn.GELU(),
-                nn.Linear(args.block_out_channels[0], args.block_out_channels[0]),
+                nn.Linear(80, 80),
             )
             self.speaker_embedding_temporal = nn.Sequential(
-                nn.Linear(40, args.block_out_channels[0]),
+                nn.Linear(40, 80),
                 nn.GELU(),
-                nn.Linear(args.block_out_channels[0], args.block_out_channels[0]),
+                nn.Linear(80, 80),
             )
             self.prosody_embedding = nn.Sequential(
-                nn.Linear(80, args.block_out_channels[0]),
+                nn.Linear(80, 80),
                 nn.GELU(),
-                nn.Linear(args.block_out_channels[0], args.block_out_channels[0]),
+                nn.Linear(80, 80),
             )
 
         if args.time_embedding_act_fn is None:
@@ -359,7 +360,7 @@ class UNet2DConditionModel(nn.Module):
             prosody_emb = self.prosody_embedding(prosody_cond)
             cond = phone_emb + speaker_emb + prosody_emb
 
-        cond = cond.transpose(1, 2).unsqueeze(-1)
+        cond = cond.unsqueeze(1)
 
         emb = self.time_embedding(t_emb, None)
 
@@ -367,8 +368,10 @@ class UNet2DConditionModel(nn.Module):
             emb = self.time_embed_act(emb)
 
         sample = self.conv_in(sample)
+        cond = self.conv_in_cond(cond)
 
-        sample = sample + cond
+        # combine sample and cond by concatenating along the channel dimension
+        sample = torch.cat([sample, cond], dim=1)
 
         down_block_res_samples = (sample,)
 

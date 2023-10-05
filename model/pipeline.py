@@ -20,7 +20,7 @@ class DDPMPipeline(DiffusionPipeline):
     """
     model_cpu_offload_seq = "unet"
 
-    def __init__(self, unet, scheduler, model_args, device="cpu"):
+    def __init__(self, unet, scheduler, model_args, timesteps=100, device="cpu"):
         super().__init__()
         # instantiate copy of unet
         self.register_modules(unet=unet, scheduler=scheduler)
@@ -28,6 +28,7 @@ class DDPMPipeline(DiffusionPipeline):
         self.unet = self.unet.to(device)
         self.unet.eval()
         self._device = device
+        self.timesteps = timesteps
 
     @torch.no_grad()
     def __call__(
@@ -54,6 +55,8 @@ class DDPMPipeline(DiffusionPipeline):
             )
 
         image = randn_tensor(image_shape, device=self._device, generator=generator)
+
+        self.scheduler.set_timesteps(self.timesteps, device=self._device)
 
         for t in self.progress_bar(self.scheduler.timesteps):
             # 1. predict noise model_output

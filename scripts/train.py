@@ -237,13 +237,12 @@ def evaluate():
     if accelerator.is_main_process:
         eval_model = UNet2DConditionModel(model_args)
         eval_model.from_pretrained(checkpoint_path)
-        eval_noise_scheduler = DDPMScheduler(
-            num_train_timesteps=training_args.ddpm_num_steps_inference,
-            beta_schedule=training_args.ddpm_beta_schedule,
-            timestep_spacing="linspace",
-        )
         pipeline = DDPMPipeline(
-            eval_model, eval_noise_scheduler, model_args, device="cpu"
+            eval_model,
+            noise_scheduler,
+            model_args,
+            device="cpu",
+            timesteps=training_args.ddpm_num_steps_inference,
         )
         with torch.no_grad():
             if training_args.train_type == "encoder":
@@ -251,7 +250,7 @@ def evaluate():
                     iter(val_dl)
                 )
                 bsz = packed_prosody.shape[0]
-                output = pipeline(packed_phones, packed_speaker)
+                output = pipeline(packed_phones, packed_speaker, batch_size=bsz)
                 output = output * packed_mask.unsqueeze(-1).cpu()
                 fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
                 for b in range(bsz):
@@ -281,6 +280,7 @@ def evaluate():
                     packed_phones,
                     packed_speaker,
                     packed_prosody,
+                    batch_size=bsz,
                 )
                 output = output * packed_mask.unsqueeze(-1).cpu()
                 fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
@@ -318,7 +318,9 @@ def evaluate_loss_only():
                 ).long()
                 noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
                 output = model(noisy_, timesteps, packed_phones, packed_speaker)
-                loss = F.mse_loss(output, packed_prosody)
+                loss = F.mse_loss(output, packed_prosody, reduction="none")
+                loss = loss * packed_mask.unsqueeze(-1)
+                loss = loss.sum() / packed_mask.sum()
             elif training_args.train_type == "decoder":
                 (
                     packed_prosody,
@@ -343,7 +345,9 @@ def evaluate_loss_only():
                     packed_speaker,
                     packed_prosody,
                 )
-                loss = F.mse_loss(output, packed_mel).item().numpy()
+                loss = F.mse_loss(output, packed_mel, reduction="none")
+                loss = loss * packed_mask.unsqueeze(-1)
+                loss = loss.sum() / packed_mask.sum()
             losses.append(loss.detach())
     loss = torch.mean(torch.tensor(losses)).item()
     wandb_log("val", {"loss": loss})
@@ -447,6 +451,8 @@ def main():
 
     # model
     model = UNet2DConditionModel(model_args)
+    if training_args.load_from_checkpoint is not None:
+        model.from_pretrained(training_args.load_from_checkpoint)
     console_rule("Model")
     print_and_draw_model(pack_factor)
 
