@@ -81,7 +81,7 @@ class EncoderCollator:
                 speaker[-(i + j + 1)] for j in range(self.pack_factor // 2)
             ]
             pack_arrs_mask = [
-                np.ones(arr.shape[0], dtype=np.bool) for arr in pack_arrs_prosody
+                np.ones(arr.shape[0], dtype=bool) for arr in pack_arrs_prosody
             ]
             current_len = 0
             for j, arr in enumerate(pack_arrs_prosody):
@@ -150,7 +150,7 @@ class EncoderCollator:
                 first_arr_prosody = prosody[i]
                 first_arr_phones = phones[i]
                 first_arr_speaker = speaker[i]
-                first_arr_mask = np.ones(first_arr_prosody.shape[0], dtype=np.bool)
+                first_arr_mask = np.ones(first_arr_prosody.shape[0], dtype=bool)
                 first_len = first_arr_prosody.shape[0]
                 if first_len > self.max_length:
                     first_arr_prosody = first_arr_prosody[: self.max_length]
@@ -246,7 +246,7 @@ class DecoderCollator:
             pack_arrs_mel = [mel[i + j] for j in range(self.pack_factor // 2)]
             pack_arrs_mel += [mel[-(i + j + 1)] for j in range(self.pack_factor // 2)]
             pack_arrs_mask = [
-                np.ones(arr.shape[0], dtype=np.bool) for arr in pack_arrs_mel
+                np.ones(arr.shape[0], dtype=bool) for arr in pack_arrs_mel
             ]
             current_len = 0
             for j, arr in enumerate(pack_arrs_prosody):
@@ -328,7 +328,7 @@ class DecoderCollator:
                 first_arr_phones = phones[i]
                 first_arr_speaker = speaker[i]
                 first_arr_mel = mel[i]
-                first_arr_mask = np.ones(first_arr_mel.shape[0], dtype=np.bool)
+                first_arr_mask = np.ones(first_arr_mel.shape[0], dtype=bool)
                 first_len = first_arr_prosody.shape[0]
                 if first_len > self.max_length:
                     first_arr_prosody = first_arr_prosody[: self.max_length]
