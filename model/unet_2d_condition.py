@@ -605,6 +605,14 @@ class CustomUNet2DConditionModel(nn.Module):
                 torch.randn(1, 1, *self.sample_size),
                 torch.ones(1, 1, self.sample_size[0]),
                 torch.randint(0, 100, (1,)),
+                torch.randint(
+                    0,
+                    100,
+                    (
+                        1,
+                        self.sample_size[0],
+                    ),
+                ),
                 torch.randn(1, self.sample_size[0], 256),
-                torch.randn(1, self.sample_size[0], 80),
+                torch.randn(1, *self.sample_size),
             ]

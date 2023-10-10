@@ -185,6 +185,7 @@ def train_epoch(epoch):
                     packed_mel,
                     packed_mask,
                 ) = batch
+                print(packed_mel.min(), packed_mel.max(), "mel stats")
                 noise = torch.randn(packed_mel.shape).to(packed_mel.device)
                 bsz = packed_mel.shape[0]
                 timesteps = torch.randint(
@@ -344,7 +345,7 @@ def evaluate():
                         packed_prosody,
                     )
                 output = output * packed_mask.unsqueeze(-1).cpu()
-                fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
+                fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(15, 30))
                 for b in range(bsz):
                     axes[b][0].imshow(output[b][0].T, vmin=-1, vmax=1)
                     axes[b][1].imshow(packed_mel[b].cpu()[0].numpy().T, vmin=-1, vmax=1)
@@ -481,10 +482,14 @@ def main():
 
     if training_args.train_type == "encoder":
         collator_args = enc_collator_args
+        max_length = collator_args.enc_max_length
     elif training_args.train_type == "decoder":
         collator_args = dec_collator_args
+        max_length = collator_args.dec_max_length
     else:
         raise ValueError(f"train_type {training_args.train_type} not supported")
+
+    model_args.sample_size = (max_length, model_args.sample_size[-1])
 
     if training_args.train_type == "encoder":
         pack_factor = collator_args.enc_pack_factor
@@ -521,6 +526,7 @@ def main():
             {
                 "training": training_args,
                 "model": model_args,
+                "collator": collator_args,
             }
         )
     validate_args(training_args, model_args, collator_args)

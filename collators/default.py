@@ -209,6 +209,8 @@ class DecoderCollator:
         speaker = np.repeat(speaker, duration, axis=0)
         # repeat phones to match mel using duration
         phones = np.repeat(phones, duration, axis=0)
+        # normalize mel
+        mel = (mel.astype(np.float32) / 255.0)
         return prosody, phones, speaker, mel
 
     def pack(self, prosody, phones, speaker, mel):
