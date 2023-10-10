@@ -263,6 +263,8 @@ def evaluate():
     checkpoint_path = save_checkpoint("temp")
     if accelerator.is_main_process:
         eval_model = MODEL_CLASS.from_pretrained(checkpoint_path)
+        eval_model.eval()
+        eval_model = eval_model.to("cpu")
         if training_args.loss_type == "diffusion":
             pipeline = DDPMPipeline(
                 eval_model,
@@ -282,13 +284,16 @@ def evaluate():
                         packed_phones, packed_speaker, batch_size=bsz, mask=packed_mask
                     )
                 elif training_args.loss_type == "mse":
-                    noise = torch.randn(packed_prosody.shape).to(packed_prosody.device)
+                    noise = torch.randn(packed_prosody.shape).to("cpu")
+                    packed_mask = packed_mask.to("cpu")
                     timestep = torch.randint(
                         0,
                         noise_scheduler_eval.config.num_train_timesteps,
                         (bsz,),
                         device=packed_prosody.device,
-                    ).long()
+                    ).long().to("cpu")
+                    packed_phones = packed_phones.to("cpu")
+                    packed_speaker = packed_speaker.to("cpu")
                     output = eval_model(
                         noise, packed_mask, timestep, packed_phones, packed_speaker
                     )
@@ -329,13 +334,17 @@ def evaluate():
                         mask=packed_mask,
                     )
                 elif training_args.loss_type == "mse":
-                    noise = torch.randn(packed_mel.shape).to(packed_mel.device)
+                    noise = torch.randn(packed_mel.shape).to("cpu")
+                    packed_mask = packed_mask.to("cpu")
                     timestep = torch.randint(
                         0,
                         noise_scheduler_eval.config.num_train_timesteps,
                         (bsz,),
                         device=packed_mel.device,
-                    ).long()
+                    ).long().to("cpu")
+                    packed_phones = packed_phones.to("cpu")
+                    packed_speaker = packed_speaker.to("cpu")
+                    packed_prosody = packed_prosody.to("cpu")
                     output = eval_model(
                         noise,
                         packed_mask,
