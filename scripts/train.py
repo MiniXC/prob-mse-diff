@@ -164,11 +164,17 @@ def train_epoch(epoch):
                     (bsz,),
                     device=packed_prosody.device,
                 ).long()
-                noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
-                output = model(
-                    noisy_, packed_mask, timesteps, packed_phones, packed_speaker
-                )
-                loss = F.mse_loss(output, noise, reduction="none")
+                if training_args.loss_type == "diffusion":
+                    noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
+                    output = model(
+                        noisy_, packed_mask, timesteps, packed_phones, packed_speaker
+                    )
+                    loss = F.mse_loss(output, noise, reduction="none")
+                elif training_args.loss_type == "mse":
+                    output = model(
+                        noise, packed_mask, timesteps, packed_phones, packed_speaker
+                    )
+                    loss = F.mse_loss(output, packed_prosody, reduction="none")
                 loss = loss * packed_mask.unsqueeze(-1)
                 loss = loss.sum() / packed_mask.sum() / model_args.sample_size[-1]
             elif training_args.train_type == "decoder":
@@ -187,16 +193,27 @@ def train_epoch(epoch):
                     (bsz,),
                     device=packed_mel.device,
                 ).long()
-                noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
-                output = model(
-                    noisy_,
-                    packed_mask,
-                    timesteps,
-                    packed_phones,
-                    packed_speaker,
-                    packed_prosody,
-                )
-                loss = F.mse_loss(output, noise, reduction="none")
+                if training_args.loss_type == "diffusion":
+                    noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
+                    output = model(
+                        noisy_,
+                        packed_mask,
+                        timesteps,
+                        packed_phones,
+                        packed_speaker,
+                        packed_prosody,
+                    )
+                    loss = F.mse_loss(output, noise, reduction="none")
+                elif training_args.loss_type == "mse":
+                    output = model(
+                        noise,
+                        packed_mask,
+                        timesteps,
+                        packed_phones,
+                        packed_speaker,
+                        packed_prosody,
+                    )
+                    loss = F.mse_loss(output, packed_mel, reduction="none")
                 loss = loss * packed_mask.unsqueeze(-1)
                 loss = loss.sum() / packed_mask.sum() / model_args.sample_size[-1]
             accelerator.backward(loss)
@@ -245,22 +262,35 @@ def evaluate():
     checkpoint_path = save_checkpoint("temp")
     if accelerator.is_main_process:
         eval_model = MODEL_CLASS.from_pretrained(checkpoint_path)
-        pipeline = DDPMPipeline(
-            eval_model,
-            noise_scheduler_eval,
-            model_args,
-            device="cpu",
-            timesteps=training_args.ddpm_num_steps_inference,
-        )
+        if training_args.loss_type == "diffusion":
+            pipeline = DDPMPipeline(
+                eval_model,
+                noise_scheduler_eval,
+                model_args,
+                device="cpu",
+                timesteps=training_args.ddpm_num_steps_inference,
+            )
         with torch.no_grad():
             if training_args.train_type == "encoder":
                 packed_prosody, packed_phones, packed_speaker, packed_mask = next(
                     iter(val_dl)
                 )
                 bsz = packed_prosody.shape[0]
-                output = pipeline(
-                    packed_phones, packed_speaker, batch_size=bsz, mask=packed_mask
-                )
+                if training_args.loss_type == "diffusion":
+                    output = pipeline(
+                        packed_phones, packed_speaker, batch_size=bsz, mask=packed_mask
+                    )
+                elif training_args.loss_type == "mse":
+                    noise = torch.randn(packed_prosody.shape).to(packed_prosody.device)
+                    timestep = torch.randint(
+                        0,
+                        noise_scheduler_eval.config.num_train_timesteps,
+                        (bsz,),
+                        device=packed_prosody.device,
+                    ).long()
+                    output = eval_model(
+                        noise, packed_mask, timestep, packed_phones, packed_speaker
+                    )
                 output = output * packed_mask.unsqueeze(-1).cpu()
                 fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
                 for b in range(bsz):
@@ -289,13 +319,30 @@ def evaluate():
                     packed_mask,
                 ) = next(iter(val_dl))
                 bsz = packed_mel.shape[0]
-                output = pipeline(
-                    packed_phones,
-                    packed_speaker,
-                    packed_prosody,
-                    batch_size=bsz,
-                    mask=packed_mask,
-                )
+                if training_args.loss_type == "diffusion":
+                    output = pipeline(
+                        packed_phones,
+                        packed_speaker,
+                        packed_prosody,
+                        batch_size=bsz,
+                        mask=packed_mask,
+                    )
+                elif training_args.loss_type == "mse":
+                    noise = torch.randn(packed_mel.shape).to(packed_mel.device)
+                    timestep = torch.randint(
+                        0,
+                        noise_scheduler_eval.config.num_train_timesteps,
+                        (bsz,),
+                        device=packed_mel.device,
+                    ).long()
+                    output = eval_model(
+                        noise,
+                        packed_mask,
+                        timestep,
+                        packed_phones,
+                        packed_speaker,
+                        packed_prosody,
+                    )
                 output = output * packed_mask.unsqueeze(-1).cpu()
                 fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
                 for b in range(bsz):
@@ -331,11 +378,17 @@ def evaluate_loss_only():
                     (bsz,),
                     device=packed_prosody.device,
                 ).long()
-                noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
-                output = model(
-                    noisy_, packed_mask, timesteps, packed_phones, packed_speaker
-                )
-                loss = F.mse_loss(output, noise, reduction="none")
+                if training_args.loss_type == "diffusion":
+                    noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
+                    output = model(
+                        noisy_, packed_mask, timesteps, packed_phones, packed_speaker
+                    )
+                    loss = F.mse_loss(output, noise, reduction="none")
+                elif training_args.loss_type == "mse":
+                    output = model(
+                        noise, packed_mask, timesteps, packed_phones, packed_speaker
+                    )
+                    loss = F.mse_loss(output, packed_prosody, reduction="none")
                 loss = loss * packed_mask.unsqueeze(-1)
                 loss = loss.sum() / packed_mask.sum() / model_args.sample_size[-1]
             elif training_args.train_type == "decoder":
@@ -354,16 +407,27 @@ def evaluate_loss_only():
                     (bsz,),
                     device=packed_mel.device,
                 ).long()
-                noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
-                output = model(
-                    noisy_,
-                    packed_mask,
-                    timesteps,
-                    packed_phones,
-                    packed_speaker,
-                    packed_prosody,
-                )
-                loss = F.mse_loss(output, noise, reduction="none")
+                if training_args.loss_type == "diffusion":
+                    noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
+                    output = model(
+                        noisy_,
+                        packed_mask,
+                        timesteps,
+                        packed_phones,
+                        packed_speaker,
+                        packed_prosody,
+                    )
+                    loss = F.mse_loss(output, noise, reduction="none")
+                elif training_args.loss_type == "mse":
+                    output = model(
+                        noise,
+                        packed_mask,
+                        timesteps,
+                        packed_phones,
+                        packed_speaker,
+                        packed_prosody,
+                    )
+                    loss = F.mse_loss(output, packed_mel, reduction="none")
                 loss = loss * packed_mask.unsqueeze(-1)
                 loss = loss.sum() / packed_mask.sum() / model_args.sample_size[-1]
             losses.append(loss.detach())

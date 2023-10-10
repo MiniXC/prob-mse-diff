@@ -1,1 +1,1 @@
-accelerate launch scripts/train.py --run_name baseline_larger_lr --wandb_mode online
+accelerate launch scripts/train.py --run_name baseline_encoder_mse --wandb_mode offline
