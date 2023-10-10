@@ -42,9 +42,14 @@ from configs.args import (
 )
 from configs.validation import validate_args
 from util.remote import wandb_update_config, wandb_init, push_to_hub
-from model.unet_2d_condition import UNet2DConditionModel
+from model.unet_2d_condition import (
+    CustomUNet2DConditionModel,
+    WrapperUNet2DConditionModel,
+)
 from model.pipeline import DDPMPipeline
 from collators import get_collator
+
+MODEL_CLASS = CustomUNet2DConditionModel
 
 
 def print_and_draw_model(pack_factor):
@@ -239,11 +244,10 @@ def evaluate():
     # pass the first batch through the pipeline
     checkpoint_path = save_checkpoint("temp")
     if accelerator.is_main_process:
-        eval_model = UNet2DConditionModel(model_args)
-        eval_model.from_pretrained(checkpoint_path)
+        eval_model = MODEL_CLASS.from_pretrained(checkpoint_path)
         pipeline = DDPMPipeline(
             eval_model,
-            noise_scheduler,
+            noise_scheduler_eval,
             model_args,
             device="cpu",
             timesteps=training_args.ddpm_num_steps_inference,
@@ -257,11 +261,13 @@ def evaluate():
                 output = pipeline(
                     packed_phones, packed_speaker, batch_size=bsz, mask=packed_mask
                 )
-                # output = output * packed_mask.unsqueeze(-1).cpu()
+                output = output * packed_mask.unsqueeze(-1).cpu()
                 fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
                 for b in range(bsz):
-                    axes[b][0].imshow(output[b][0].T)
-                    axes[b][1].imshow(packed_prosody[b].cpu()[0].numpy().T)
+                    axes[b][0].imshow(output[b][0].T, vmin=-1, vmax=1)
+                    axes[b][1].imshow(
+                        packed_prosody[b].cpu()[0].numpy().T, vmin=-1, vmax=1
+                    )
                 plt.tight_layout()
                 plt.savefig("figures/current_val.png")
                 plt.close()
@@ -290,11 +296,11 @@ def evaluate():
                     batch_size=bsz,
                     mask=packed_mask,
                 )
-                # output = output * packed_mask.unsqueeze(-1).cpu()
+                output = output * packed_mask.unsqueeze(-1).cpu()
                 fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
                 for b in range(bsz):
-                    axes[b][0].imshow(output[b][0].T)
-                    axes[b][1].imshow(packed_mel[b].cpu()[0].numpy().T)
+                    axes[b][0].imshow(output[b][0].T, vmin=-1, vmax=1)
+                    axes[b][1].imshow(packed_mel[b].cpu()[0].numpy().T, vmin=-1, vmax=1)
                 plt.tight_layout()
                 plt.savefig("figures/current_val.png")
                 plt.close()
@@ -330,12 +336,6 @@ def evaluate_loss_only():
                     noisy_, packed_mask, timesteps, packed_phones, packed_speaker
                 )
                 loss = F.mse_loss(output, noise, reduction="none")
-                if i == 0:
-                    plt.imshow(output[0][0].T.cpu())
-                    plt.savefig("figures/val0.png")
-                    plt.imshow(noise[0][0].T.cpu())
-                    plt.savefig("figures/val1.png")
-                    plt.close()
                 loss = loss * packed_mask.unsqueeze(-1)
                 loss = loss.sum() / packed_mask.sum() / model_args.sample_size[-1]
             elif training_args.train_type == "decoder":
@@ -364,11 +364,6 @@ def evaluate_loss_only():
                     packed_prosody,
                 )
                 loss = F.mse_loss(output, noise, reduction="none")
-                if i == 0:
-                    plt.imshow(output[0][0].T.cpu())
-                    plt.savefig("figures/val0.png")
-                    plt.imshow(noise[0][0].T.cpu())
-                    plt.savefig("figures/val1.png")
                 loss = loss * packed_mask.unsqueeze(-1)
                 loss = loss.sum() / packed_mask.sum() / model_args.sample_size[-1]
             losses.append(loss.detach())
@@ -377,7 +372,7 @@ def evaluate_loss_only():
 
 
 def main():
-    global accelerator, training_args, model_args, collator_args, train_dl, val_dl, optimizer, scheduler, model, global_step, pbar, noise_scheduler
+    global accelerator, training_args, model_args, collator_args, train_dl, val_dl, optimizer, scheduler, model, global_step, pbar, noise_scheduler, noise_scheduler_eval
 
     global_step = 0
 
@@ -473,12 +468,12 @@ def main():
     console_print(f"[green]process_index[/green]: {accelerator.process_index}")
 
     # model
-    model = UNet2DConditionModel(model_args)
+    model = MODEL_CLASS(model_args)
     if training_args.load_from_checkpoint is not None:
         console_print(
             f"[green]load_from_checkpoint[/green]: {training_args.load_from_checkpoint}"
         )
-        model = UNet2DConditionModel.from_pretrained(training_args.load_from_checkpoint)
+        model = MODEL_CLASS.from_pretrained(training_args.load_from_checkpoint)
     console_rule("Model")
     print_and_draw_model(pack_factor)
 
@@ -547,7 +542,13 @@ def main():
     )
 
     # optimizer
-    optimizer = torch.optim.AdamW(model.parameters(), lr=training_args.lr)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=training_args.lr,
+        betas=(0.95, 0.999),
+        eps=1e-8,
+        weight_decay=1e-6,
+    )
 
     # scheduler
     if training_args.lr_schedule == "linear_with_warmup":
@@ -565,6 +566,11 @@ def main():
         )
 
     noise_scheduler = DDPMScheduler(
+        num_train_timesteps=training_args.ddpm_num_steps,
+        beta_schedule=training_args.ddpm_beta_schedule,
+        timestep_spacing="linspace",
+    )
+    noise_scheduler_eval = DDPMScheduler(
         num_train_timesteps=training_args.ddpm_num_steps,
         beta_schedule=training_args.ddpm_beta_schedule,
         timestep_spacing="linspace",

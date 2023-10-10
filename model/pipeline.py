@@ -91,14 +91,11 @@ class DDPMPipeline(DiffusionPipeline):
                     speaker_cond_temporal,
                 )
 
-            print(image[mask].min(), image[mask].max())
-
             # 2. compute previous image: x_t -> x_t-1
-            image = self.scheduler.step(
-                model_output, t, image, generator=generator
-            ).prev_sample
+            result = self.scheduler.step(model_output, t, image, generator=generator)
+            image = result.prev_sample
 
-            gif_image = image.clone().detach().cpu()[0]
+            gif_image = result.pred_original_sample.clone().detach().cpu()[0]
             # min-max normalize
             gif_image = (gif_image - gif_image.min()) / (
                 gif_image.max() - gif_image.min()
@@ -106,7 +103,6 @@ class DDPMPipeline(DiffusionPipeline):
             gif_image = (gif_image * 255).type(torch.uint8)
             gif_image = gif_image.squeeze(0).T
             # flip y axis
-            gif_image = gif_image.flip(0)
             all_images.append(gif_image)
 
         imageio.mimsave("figures/diffusion_process.gif", all_images, duration=0.05)

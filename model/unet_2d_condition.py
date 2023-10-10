@@ -7,6 +7,7 @@ import torch.utils.checkpoint
 import yaml
 from pathlib import Path
 from transformers.utils.hub import cached_file
+from diffusers import UNet2DModel
 from diffusers.models.activations import get_activation
 from diffusers.models.embeddings import (
     GaussianFourierProjection,
@@ -24,7 +25,114 @@ from diffusers.models.unet_2d_blocks import (
 from configs.args import ModelArgs
 
 
-class UNet2DConditionModel(nn.Module):
+class WrapperUNet2DConditionModel(nn.Module):
+    def __init__(self, args: ModelArgs):
+        super().__init__()
+        self.model = UNet2DModel(
+            sample_size=args.sample_size,
+            in_channels=2,
+            out_channels=1,
+            layers_per_block=2,
+            block_out_channels=(
+                64,
+                64,
+                128,
+                256,
+                512,
+            ),
+            down_block_types=(
+                "DownBlock2D",
+                "DownBlock2D",
+                "DownBlock2D",
+                # "DownBlock2D",
+                "AttnDownBlock2D",
+                "DownBlock2D",
+            ),
+            up_block_types=(
+                "UpBlock2D",
+                "AttnUpBlock2D",
+                # "UpBlock2D",
+                "UpBlock2D",
+                "UpBlock2D",
+                "UpBlock2D",
+            ),
+        )
+        self.phone_embedding = nn.Embedding(args.num_phones, 80)
+        self.args = args
+
+    def forward(
+        self,
+        sample,
+        sample_mask,
+        timesteps,
+        phone_cond,
+        speaker_cond,
+        prosody_cond=None,
+        attention_mask=None,
+        encoder_hidden_states=None,
+        encoder_attention_mask=None,
+    ):
+        phone_emb = self.phone_embedding(phone_cond)
+        phone_emb = phone_emb.reshape(sample.shape[0], 1, -1, 80)
+        sample = torch.cat([sample, phone_emb], dim=1)
+        return self.model(
+            sample,
+            timesteps,
+        ).sample
+
+    def save_model(self, path, accelerator=None):
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        if accelerator is not None:
+            accelerator.save_model(self, path)
+        else:
+            torch.save(self.state_dict(), path / "pytorch_model.bin")
+        with open(path / "model_config.yml", "w") as f:
+            f.write(yaml.dump(self.args.__dict__, Dumper=yaml.Dumper))
+
+    @staticmethod
+    def from_pretrained(path_or_hubid):
+        path = Path(path_or_hubid)
+        if path.exists():
+            config_file = path / "model_config.yml"
+            model_file = path / "pytorch_model.bin"
+        else:
+            config_file = cached_file(path_or_hubid, "model_config.yml")
+            model_file = cached_file(path_or_hubid, "pytorch_model.bin")
+        args = yaml.load(open(config_file, "r"), Loader=yaml.Loader)
+        args = ModelArgs(**args)
+        model = WrapperUNet2DConditionModel(args)
+        model.load_state_dict(torch.load(model_file))
+        return model
+
+    @property
+    def dummy_input(self):
+        torch.manual_seed(0)
+        if self.args.model_type == "encoder":
+            return [
+                torch.randn(1, 1, *self.args.sample_size),
+                torch.ones(1, 1, self.args.sample_size[0]),
+                torch.randint(0, 100, (1,)),
+                torch.randint(
+                    0,
+                    100,
+                    (
+                        1,
+                        self.args.sample_size[0],
+                    ),
+                ),
+                torch.randn(1, self.args.sample_size[0]),
+            ]
+        elif self.args.model_type == "decoder":
+            return [
+                torch.randn(1, 1, *self.args.sample_size),
+                torch.ones(1, 1, self.args.sample_size[0]),
+                torch.randint(0, 100, (1,)),
+                torch.randn(1, self.args.sample_size[0]),
+            ]
+
+
+class CustomUNet2DConditionModel(nn.Module):
     r"""
     A conditional 2D UNet model that takes a noisy sample, conditional state, and a timestep and returns a sample
     shaped output.
@@ -470,7 +578,7 @@ class UNet2DConditionModel(nn.Module):
             model_file = cached_file(path_or_hubid, "pytorch_model.bin")
         args = yaml.load(open(config_file, "r"), Loader=yaml.Loader)
         args = ModelArgs(**args)
-        model = UNet2DConditionModel(args)
+        model = CustomUNet2DConditionModel(args)
         model.load_state_dict(torch.load(model_file))
         return model
 

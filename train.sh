@@ -1,1 +1,1 @@
-accelerate launch scripts/train.py --run_name encoder_baseline_diff_fixed3 --do_save --wandb_mode online
+accelerate launch scripts/train.py --run_name baseline_larger_lr --wandb_mode online
