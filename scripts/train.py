@@ -185,7 +185,6 @@ def train_epoch(epoch):
                     packed_mel,
                     packed_mask,
                 ) = batch
-                print(packed_mel.min(), packed_mel.max(), "mel stats")
                 noise = torch.randn(packed_mel.shape).to(packed_mel.device)
                 bsz = packed_mel.shape[0]
                 timesteps = torch.randint(
