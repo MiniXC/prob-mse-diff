@@ -75,3 +75,17 @@ def plot_first_batch(batch, args: TrainingArgs, collator_args):
         axes[4].set_title("Mask")
     plt.tight_layout()
     return fig
+
+
+def plot_first_batch_byt5(batch):
+    input_ids = batch["input_ids"].unsqueeze(0).numpy()
+    labels = batch["labels"].unsqueeze(0).numpy()
+    bsz = input_ids.shape[0]
+    fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 5), squeeze=False)
+    for i in range(bsz):
+        axes[i][0].imshow(input_ids[i], aspect="auto")
+        axes[i][1].imshow(labels[i], aspect="auto")
+        axes[i][0].set_title("Input")
+        axes[i][1].set_title("Target")
+    plt.tight_layout()
+    return fig
