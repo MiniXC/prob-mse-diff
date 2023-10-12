@@ -81,7 +81,7 @@ class EncoderCollator:
                 speaker[-(i + j + 1)] for j in range(self.pack_factor // 2)
             ]
             pack_arrs_mask = [
-                np.ones(arr.shape[0], dtype=np.bool) for arr in pack_arrs_prosody
+                np.ones(arr.shape[0], dtype=bool) for arr in pack_arrs_prosody
             ]
             current_len = 0
             for j, arr in enumerate(pack_arrs_prosody):
@@ -150,7 +150,7 @@ class EncoderCollator:
                 first_arr_prosody = prosody[i]
                 first_arr_phones = phones[i]
                 first_arr_speaker = speaker[i]
-                first_arr_mask = np.ones(first_arr_prosody.shape[0], dtype=np.bool)
+                first_arr_mask = np.ones(first_arr_prosody.shape[0], dtype=bool)
                 first_len = first_arr_prosody.shape[0]
                 if first_len > self.max_length:
                     first_arr_prosody = first_arr_prosody[: self.max_length]
@@ -191,16 +191,26 @@ class DecoderCollator:
         prosody, phones, speaker = EncoderCollator.item_to_arrays(item)
         duration = prosody[:, 30]
         # denormalize
-        duration = np.round((duration + 0.5) * 50, 0).astype(np.int32)
+        duration = np.round(duration * 50, 0).astype(np.int32)
         mel = np.array(Image.open(item["mel"])).T
         if mel.shape[0] > duration.sum():
             duration[-1] += mel.shape[0] - duration.sum()
+        elif mel.shape[0] < duration.sum():
+            # pad mel
+            mel = np.pad(
+                mel,
+                ((0, duration.sum() - mel.shape[0]), (0, 0)),
+                mode="constant",
+                constant_values=0,
+            )
         # repeat prosody to match mel using duration
         prosody = np.repeat(prosody, duration, axis=0)
         # repeat speaker to match mel using duration
         speaker = np.repeat(speaker, duration, axis=0)
         # repeat phones to match mel using duration
         phones = np.repeat(phones, duration, axis=0)
+        # normalize mel
+        mel = (mel.astype(np.float32) / 255.0)
         return prosody, phones, speaker, mel
 
     def pack(self, prosody, phones, speaker, mel):
@@ -246,7 +256,7 @@ class DecoderCollator:
             pack_arrs_mel = [mel[i + j] for j in range(self.pack_factor // 2)]
             pack_arrs_mel += [mel[-(i + j + 1)] for j in range(self.pack_factor // 2)]
             pack_arrs_mask = [
-                np.ones(arr.shape[0], dtype=np.bool) for arr in pack_arrs_mel
+                np.ones(arr.shape[0], dtype=bool) for arr in pack_arrs_mel
             ]
             current_len = 0
             for j, arr in enumerate(pack_arrs_prosody):
@@ -328,7 +338,7 @@ class DecoderCollator:
                 first_arr_phones = phones[i]
                 first_arr_speaker = speaker[i]
                 first_arr_mel = mel[i]
-                first_arr_mask = np.ones(first_arr_mel.shape[0], dtype=np.bool)
+                first_arr_mask = np.ones(first_arr_mel.shape[0], dtype=bool)
                 first_len = first_arr_prosody.shape[0]
                 if first_len > self.max_length:
                     first_arr_prosody = first_arr_prosody[: self.max_length]
