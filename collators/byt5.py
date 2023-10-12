@@ -1,6 +1,7 @@
 from transformers import AutoTokenizer
 import numpy as np
 import json
+import torch
 
 from configs.byt5args import CollatorArgs
 
@@ -40,6 +41,7 @@ class ByT5Collator:
             return_tensors="pt",
         )
         speaker_result = np.concatenate(speaker_lst, axis=0)
+        speaker_result = torch.from_numpy(speaker_result).float()
         return {
             "input_ids": input_result["input_ids"],
             "attention_mask": input_result["attention_mask"],

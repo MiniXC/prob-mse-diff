@@ -13,6 +13,7 @@ from transformers import get_linear_schedule_with_warmup, HfArgumentParser
 from datasets import load_dataset
 import torch.nn.functional as F
 from transformers import T5ForConditionalGeneration, AutoTokenizer, Adafactor
+from torchmetrics.text import CharErrorRate
 
 # logging & etc
 from torchinfo import summary
@@ -69,6 +70,7 @@ def print_and_draw_model():
         input_data={
             "input_ids": dummy_input[0],
             "labels": dummy_input[1],
+            "speaker": torch.randn(bsz, 256),
         },
         verbose=0,
         col_names=[
@@ -84,6 +86,7 @@ def print_and_draw_model():
             input_data={
                 "input_ids": dummy_input[0],
                 "labels": dummy_input[1],
+                "speaker": torch.randn(bsz, 256),
             },
             save_graph=True,
             directory="figures/",
@@ -214,10 +217,8 @@ def evaluate():
     # pass the first batch through the pipeline
     checkpoint_path = save_checkpoint("temp")
     if accelerator.is_main_process:
-        byt5_model = T5ForConditionalGeneration.from_pretrained(
-            training_args.load_from_checkpoint
-        )
-        model.load_state_dict(torch.load(checkpoint_path / "pytorch_model.bin"))
+        print(checkpoint_path)
+        model = ByT5Wrapper.from_pretrained(checkpoint_path)
         device = "cpu"
         model = model.to(device)
         tokenizer = AutoTokenizer.from_pretrained("google/byt5-small")
@@ -234,15 +235,19 @@ def evaluate():
             gt_outputs = tokenizer.batch_decode(
                 batch["labels"], skip_special_tokens=True
             )
+            cer = CharErrorRate()
+            cer_val = cer(outputs, gt_outputs)
             wandb_log(
                 "val",
                 {
                     "inputs": inputs,
                     "outputs": outputs,
                     "gt_outputs": gt_outputs,
+                    "cer": cer_val,
                 },
                 print_log=False,
             )
+            console_print(f"[green]CER[/green]: {cer_val}")
             # print first 5
             for i in range(5):
                 console_print(f"[green]input[/green]: {inputs[i]}")
