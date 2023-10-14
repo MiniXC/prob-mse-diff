@@ -161,6 +161,7 @@ def train_epoch(epoch):
                     device=packed_prosody.device,
                 ).long()
                 if training_args.loss_type == "diffusion":
+                    packed_prosody = (packed_prosody * 2 - 1) * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
                     output = model(
                         noisy_, packed_mask, timesteps, packed_phones, packed_speaker
@@ -190,6 +191,7 @@ def train_epoch(epoch):
                     device=packed_mel.device,
                 ).long()
                 if training_args.loss_type == "diffusion":
+                    packed_mel = (packed_mel * 2 - 1) * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
                     output = model(
                         noisy_,
@@ -267,6 +269,7 @@ def evaluate():
                 model_args,
                 device="cpu",
                 timesteps=training_args.ddpm_num_steps_inference,
+                scale=training_args.diffusion_scale,
             )
         with torch.no_grad():
             if training_args.train_type == "encoder":
@@ -384,6 +387,7 @@ def evaluate_loss_only():
                     device=packed_prosody.device,
                 ).long()
                 if training_args.loss_type == "diffusion":
+                    packed_prosody = (packed_prosody * 2 - 1) * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
                     output = model(
                         noisy_, packed_mask, timesteps, packed_phones, packed_speaker
@@ -413,6 +417,7 @@ def evaluate_loss_only():
                     device=packed_mel.device,
                 ).long()
                 if training_args.loss_type == "diffusion":
+                    packed_mel = (packed_mel * 2 - 1) * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
                     output = model(
                         noisy_,

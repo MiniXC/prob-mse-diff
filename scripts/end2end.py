@@ -201,6 +201,7 @@ def main():
         encoder_model.args,
         device="cpu",
         timesteps=args.steps,
+        scale=args.scale,
     )
     encoder_result = encoder_pipeline(
         first_item_encoder["phones"],
@@ -240,6 +241,7 @@ def main():
         decoder_model.args,
         device="cpu",
         timesteps=args.steps,
+        scale=args.scale,
     )
     print(first_item_decoder["phones"].min(), first_item_decoder["phones"].max(), "phones")
     print(first_item_decoder["speaker"].min(), first_item_decoder["speaker"].max(), "speaker")
@@ -268,7 +270,7 @@ def main():
 
     audio = synth(mel_denorm.copy())
     audio = torch.from_numpy(audio)
-    torchaudio.save("audio.wav", audio, 22050)
+    torchaudio.save("figures/audio.wav", audio, 22050)
 
     if args.resynthesis:
         mel = DecoderCollator.item_to_arrays(first_item)[3]
@@ -276,7 +278,7 @@ def main():
         mel = np.flip(mel, axis=1)
         audio = synth(mel.copy())
         audio = torch.from_numpy(audio)
-        torchaudio.save("audio_original.wav", audio, 22050)
+        torchaudio.save("figures/audio_original.wav", audio, 22050)
 
 
 if __name__ == "__main__":

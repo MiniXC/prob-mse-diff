@@ -24,3 +24,4 @@ class End2EndArgs:
     teacher_force_decoder: bool = False
     perform_on_unseen_speaker: bool = False
     resynthesis: bool = True
+    scale: float = None

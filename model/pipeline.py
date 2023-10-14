@@ -20,7 +20,7 @@ class DDPMPipeline(DiffusionPipeline):
     """
     model_cpu_offload_seq = "unet"
 
-    def __init__(self, unet, scheduler, model_args, timesteps=100, device="cpu"):
+    def __init__(self, unet, scheduler, model_args, timesteps=100, device="cpu", scale=None):
         super().__init__()
         # instantiate copy of unet
         self.register_modules(unet=unet, scheduler=scheduler)
@@ -29,6 +29,7 @@ class DDPMPipeline(DiffusionPipeline):
         self.unet.eval()
         self._device = device
         self.timesteps = timesteps
+        self.scale = scale
 
     @torch.no_grad()
     def __call__(
@@ -107,5 +108,8 @@ class DDPMPipeline(DiffusionPipeline):
         imageio.mimsave("figures/diffusion_process.gif", all_images, duration=0.05)
 
         image = image.cpu()
+        if self.scale is not None:
+            image = torch.clamp(image, -self.scale, self.scale)
+            image = (image + self.scale) / (2 * self.scale)
 
         return image
