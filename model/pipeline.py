@@ -36,7 +36,6 @@ class DDPMPipeline(DiffusionPipeline):
         phone_cond,
         speaker_cond,
         prosody_cond=None,
-        speaker_cond_temporal=None,
         batch_size=1,
         generator=None,
         mask=None,
@@ -66,11 +65,12 @@ class DDPMPipeline(DiffusionPipeline):
         speaker_cond = speaker_cond.to(self._device)
         if prosody_cond is not None:
             prosody_cond = prosody_cond.to(self._device)
-        if speaker_cond_temporal is not None:
-            speaker_cond_temporal = speaker_cond_temporal.to(self._device)
         mask = mask.to(self._device)
 
         for t in self.progress_bar(self.scheduler.timesteps):
+
+            image = self.scheduler.scale_model_input(image, t)
+
             # 1. predict noise model_output
             if self.model_args.model_type == "encoder":
                 model_output = self.unet(
@@ -88,7 +88,6 @@ class DDPMPipeline(DiffusionPipeline):
                     phone_cond,
                     speaker_cond,
                     prosody_cond,
-                    speaker_cond_temporal,
                 )
 
             # 2. compute previous image: x_t -> x_t-1

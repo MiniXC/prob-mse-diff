@@ -2,6 +2,7 @@
 # Template specific #
 #####################
 
+models/
 checkpoints/
 outputs/
 wandb/

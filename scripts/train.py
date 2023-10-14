@@ -42,15 +42,11 @@ from configs.args import (
 )
 from configs.validation import validate_args
 from util.remote import wandb_update_config, wandb_init, push_to_hub
-from model.unet_2d_condition import (
-    CustomUNet2DConditionModel,
-    WrapperUNet2DConditionModel,
-)
+from model.unet_2d_condition import CustomUNet2DConditionModel
 from model.pipeline import DDPMPipeline
 from collators import get_collator
 
 MODEL_CLASS = CustomUNet2DConditionModel
-
 
 def print_and_draw_model(pack_factor):
     bsz = training_args.batch_size // pack_factor
