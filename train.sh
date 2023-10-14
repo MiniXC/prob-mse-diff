@@ -18,3 +18,4 @@ elif [ "$1" == "--machine" ] && [ "$2" == "v3-2" ]; then
     --valid_batch_size 16 \
     --lr 8.0e-5 \
     --n_steps 250000
+fi
