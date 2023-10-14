@@ -466,8 +466,6 @@ def main():
         [TrainingArgs, ModelArgs, EncoderCollatorArgs, DecoderCollatorArgs]
     )
 
-    accelerator = Accelerator()
-
     # parse args
     if len(sys.argv) > 1 and sys.argv[1].endswith(".yml"):
         with open(sys.argv[1], "r") as f:
@@ -500,6 +498,12 @@ def main():
             enc_collator_args,
             dec_collator_args,
         ) = parser.parse_args_into_dataclasses()
+
+    
+    if not training_args.bf16:
+        accelerator = Accelerator()
+    else:
+        accelerator = Accelerator(mixed_precision="bf16")
 
     if training_args.train_type == "encoder":
         collator_args = enc_collator_args

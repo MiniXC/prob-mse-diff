@@ -40,6 +40,7 @@ class TrainingArgs:
     loss_type: str = "diffusion" # diffusion or mse
     phone_mask_prob: float = 0.05
     prosody_mask_prob: float = 0.5
+    bf16: bool = True
 
 
 @dataclass
