@@ -163,7 +163,7 @@ def train_epoch(epoch):
                 if training_args.loss_type == "diffusion":
                     packed_prosody = (packed_prosody * 2 - 1) * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
-                    phone_mask = torch.rand(bsz, packed_phones.shape[1], 1) > training_args.phone_mask_prob
+                    phone_mask = torch.rand(bsz, packed_phones.shape[1]) > training_args.phone_mask_prob
                     packed_phones = packed_phones * phone_mask
                     output = model(
                         noisy_, packed_mask, timesteps, packed_phones, packed_speaker
@@ -195,7 +195,7 @@ def train_epoch(epoch):
                 if training_args.loss_type == "diffusion":
                     packed_mel = (packed_mel * 2 - 1) * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
-                    phone_mask = torch.rand(bsz, packed_phones.shape[1], 1) > training_args.phone_mask_prob
+                    phone_mask = torch.rand(bsz, packed_phones.shape[1]) > training_args.phone_mask_prob
                     prosody_mask = torch.rand(bsz, packed_prosody.shape[1], 1) > training_args.prosody_mask_prob
                     packed_phones = packed_phones * phone_mask
                     packed_prosody = packed_prosody * prosody_mask
@@ -284,7 +284,7 @@ def evaluate():
                 )
                 bsz = packed_prosody.shape[0]
                 if training_args.loss_type == "diffusion":
-                    phone_mask = torch.rand(bsz, packed_phones.shape[1], 1) > training_args.phone_mask_prob
+                    phone_mask = torch.rand(bsz, packed_phones.shape[1]) > training_args.phone_mask_prob
                     packed_phones = packed_phones * phone_mask
                     output = pipeline(
                         packed_phones, packed_speaker, batch_size=bsz, mask=packed_mask
@@ -332,7 +332,7 @@ def evaluate():
                 ) = next(iter(val_dl))
                 bsz = packed_mel.shape[0]
                 if training_args.loss_type == "diffusion":
-                    phone_mask = torch.rand(bsz, packed_phones.shape[1], 1) > training_args.phone_mask_prob
+                    phone_mask = torch.rand(bsz, packed_phones.shape[1]) > training_args.phone_mask_prob
                     prosody_mask = torch.rand(bsz, packed_prosody.shape[1], 1) > training_args.prosody_mask_prob
                     packed_phones = packed_phones * phone_mask
                     packed_prosody = packed_prosody * prosody_mask
