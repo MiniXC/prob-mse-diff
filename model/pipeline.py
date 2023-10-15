@@ -1,7 +1,13 @@
+from pathlib import Path
+
 import torch
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.utils.torch_utils import randn_tensor
+from diffusers import DDPMScheduler
 import imageio
+import yaml
+
+from configs.args import ModelArgs, TrainingArgs
 
 
 class DDPMPipeline(DiffusionPipeline):
@@ -20,7 +26,7 @@ class DDPMPipeline(DiffusionPipeline):
     """
     model_cpu_offload_seq = "unet"
 
-    def __init__(self, unet, scheduler, model_args, timesteps=100, device="cpu", scale=None):
+    def __init__(self, unet, scheduler, model_args, training_args, device="cpu"):
         super().__init__()
         # instantiate copy of unet
         self.register_modules(unet=unet, scheduler=scheduler)
@@ -28,12 +34,13 @@ class DDPMPipeline(DiffusionPipeline):
         self.unet = self.unet.to(device)
         self.unet.eval()
         self._device = device
-        self.timesteps = timesteps
-        self.scale = scale
+        self.scale = training_args.diffusion_scale
+        self.prosody_mask_prob = training_args.prosody_mask_prob
 
     @torch.no_grad()
     def __call__(
         self,
+        steps,
         phone_cond,
         speaker_cond,
         prosody_cond=None,
@@ -59,7 +66,7 @@ class DDPMPipeline(DiffusionPipeline):
 
         all_images = []
 
-        self.scheduler.set_timesteps(self.timesteps, device=self._device)
+        self.scheduler.set_timesteps(steps, device=self._device)
 
         image = image.to(self._device)
         phone_cond = phone_cond.to(self._device)
@@ -67,6 +74,10 @@ class DDPMPipeline(DiffusionPipeline):
         if prosody_cond is not None:
             prosody_cond = prosody_cond.to(self._device)
         mask = mask.to(self._device)
+
+        if self.model_args.model_type == "decoder":
+            prosody_mask = torch.rand((batch_size, prosody_cond.shape[1], 1), device=self._device) < self.prosody_mask_prob
+            prosody_cond = prosody_cond * prosody_mask
 
         for t in self.progress_bar(self.scheduler.timesteps):
 
@@ -113,3 +124,35 @@ class DDPMPipeline(DiffusionPipeline):
             image = (image + self.scale) / (2 * self.scale)
 
         return image
+
+    @staticmethod
+    def from_pretrained(path_or_hubid, model, device="cpu", scheduler_class=DDPMScheduler):
+        path = Path(path_or_hubid)
+        if path.exists():
+            config_file = path / "model_config.yml"
+            training_config_file = path / "training_args.yml"
+        else:
+            config_file = cached_file(path_or_hubid, "model_config.yml")
+            training_config_file = cached_file(path_or_hubid, "training_args.yml")
+        args = yaml.load(open(config_file, "r"), Loader=yaml.Loader)
+        args = ModelArgs(**args)
+        training_args = yaml.load(open(training_config_file, "r"), Loader=yaml.Loader)
+        # check if diffusion_scale is in training_args
+        if "diffusion_scale" not in training_args:
+            training_args["diffusion_scale"] = None
+        if "prosody_mask_prob" not in training_args:
+            training_args["prosody_mask_prob"] = None
+        training_args = TrainingArgs(**training_args)
+        scheduler = scheduler_class(
+            num_train_timesteps=training_args.ddpm_num_steps,
+            beta_schedule=training_args.ddpm_beta_schedule,
+            timestep_spacing="linspace",
+        )
+        pipeline = DDPMPipeline(
+            model, 
+            scheduler,
+            args,
+            training_args,
+            device=device,
+        )
+        return pipeline

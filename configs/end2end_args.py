@@ -14,7 +14,7 @@ class End2EndArgs:
     g2p_tokenizer: str = "google/byt5-small"
     g2p_model: str = "models/byt5_baseline_speaker_32k"
     encoder_model: str = "models/baseline_encoder_diffusion_249k"
-    decoder_model: str = "models/baseline_decoder_diffusion_112k"
+    decoder_model: str = "models/decoder_diffusion_v2_107k"
     ddpm_num_steps: int = 1000
     ddpm_beta_schedule: str = "linear"
     steps: int = 20

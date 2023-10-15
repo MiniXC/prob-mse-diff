@@ -41,6 +41,7 @@ class TrainingArgs:
     phone_mask_prob: float = 0.05
     prosody_mask_prob: float = 0.5
     bf16: bool = True
+    n_epochs: int = None # this is set by the trainer, changing this value will have no effect
 
 
 @dataclass

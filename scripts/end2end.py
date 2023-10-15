@@ -185,25 +185,13 @@ def main():
 
 
     console.rule("Running encoder")
-    noise_scheduler = DDPMScheduler(
-        num_train_timesteps=args.ddpm_num_steps,
-        beta_schedule=args.ddpm_beta_schedule,
-        timestep_spacing="linspace",
-    )
-    noise_scheduler_ancestral = EulerAncestralDiscreteScheduler(
-        num_train_timesteps=args.ddpm_num_steps,
-        beta_schedule=args.ddpm_beta_schedule,
-        timestep_spacing="linspace",
-    )
-    encoder_pipeline = DDPMPipeline(
+    encoder_pipeline = DDPMPipeline.from_pretrained(
+        args.encoder_model,
         encoder_model,
-        noise_scheduler,
-        encoder_model.args,
         device="cpu",
-        timesteps=args.steps,
-        scale=args.scale,
     )
     encoder_result = encoder_pipeline(
+        args.steps,
         first_item_encoder["phones"],
         first_item_encoder["speaker"],
         batch_size=1,
@@ -235,18 +223,16 @@ def main():
         first_item_decoder["speaker"][0, :tf_phones_len] = tf_speaker
         first_item_decoder["mask"] = tf_mask
 
-    decoder_pipeline = DDPMPipeline(
+    decoder_pipeline = DDPMPipeline.from_pretrained(
+        args.decoder_model,
         decoder_model,
-        noise_scheduler,
-        decoder_model.args,
         device="cpu",
-        timesteps=args.steps,
-        scale=args.scale,
     )
     print(first_item_decoder["phones"].min(), first_item_decoder["phones"].max(), "phones")
     print(first_item_decoder["speaker"].min(), first_item_decoder["speaker"].max(), "speaker")
     print(first_item_decoder["prosody"].min(), first_item_decoder["prosody"].max(), "prosody")
     decoder_result = decoder_pipeline(
+        args.steps,
         first_item_decoder["phones"],
         first_item_decoder["speaker"],
         first_item_decoder["prosody"],
