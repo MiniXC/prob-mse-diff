@@ -72,6 +72,7 @@ class ModelArgs:
         "DownBlock2D",
         "DownBlock2D",
         "DownBlock2D",
+        "DownBlock2D",
         "AttnDownBlock2D",
         "DownBlock2D",
     )
@@ -82,12 +83,14 @@ class ModelArgs:
         "UpBlock2D",
         "UpBlock2D",
         "UpBlock2D",
+        "UpBlock2D",
     )
     only_cross_attention: bool = False
     block_out_channels: Tuple[int] = (
         128,
         128,
         128,
+        256,
         256,
         512,
     )
