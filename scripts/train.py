@@ -273,8 +273,8 @@ def evaluate():
                 eval_model,
                 noise_scheduler_eval,
                 model_args,
+                training_args,
                 device="cpu",
-                scale=training_args.diffusion_scale,
             )
         with torch.no_grad():
             if training_args.train_type == "encoder":
