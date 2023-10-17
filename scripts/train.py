@@ -274,7 +274,6 @@ def evaluate():
                 noise_scheduler_eval,
                 model_args,
                 device="cpu",
-                timesteps=training_args.ddpm_num_steps_inference,
                 scale=training_args.diffusion_scale,
             )
         with torch.no_grad():
@@ -287,7 +286,7 @@ def evaluate():
                     phone_mask = torch.rand(bsz, packed_phones.shape[1]) > training_args.phone_mask_prob
                     packed_phones = packed_phones * phone_mask
                     output = pipeline(
-                        packed_phones, packed_speaker, batch_size=bsz, mask=packed_mask
+                        training_args.ddpm_num_steps_inference, packed_phones, packed_speaker, batch_size=bsz, mask=packed_mask
                     )
                 elif training_args.loss_type == "mse":
                     noise = torch.randn(packed_prosody.shape).to("cpu")
@@ -337,6 +336,7 @@ def evaluate():
                     packed_phones = packed_phones * phone_mask
                     packed_prosody = packed_prosody * prosody_mask
                     output = pipeline(
+                        training_args.ddpm_num_steps_inference,
                         packed_phones,
                         packed_speaker,
                         packed_prosody,
