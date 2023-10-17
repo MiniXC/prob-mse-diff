@@ -26,7 +26,7 @@ class EncoderCollator:
         prosody = Image.open(item["prosody"])
         prosody = np.array(prosody)
         durs = prosody[-1]
-        durs = (durs - durs.mean()) / durs.std()
+        durs = (durs - durs.mean()) / (durs.std()+1e-6)
         cwt_result = EncoderCollator.compute_cwt(durs)
         cwt_result = (
             (cwt_result - cwt_result.min())
