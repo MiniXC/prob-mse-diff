@@ -60,7 +60,7 @@ class DecoderCollatorArgs:
 
 @dataclass
 class ModelArgs:
-    num_phones: int = 393
+    num_phones: int = 395
     sample_size: int = (512, 80)
     model_type: str = "encoder"
     in_channels: int = 1
