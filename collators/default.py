@@ -30,7 +30,7 @@ class EncoderCollator:
         cwt_result = EncoderCollator.compute_cwt(durs)
         cwt_result = (
             (cwt_result - cwt_result.min())
-            / (cwt_result.max() - cwt_result.min())
+            / (cwt_result.max() - cwt_result.min() + 1e-6)
             * 255
         )
         cwt_result = cwt_result.astype(np.uint8)
