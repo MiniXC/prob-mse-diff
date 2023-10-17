@@ -4,7 +4,10 @@ from .args import TrainingArgs, ModelArgs, EncoderCollatorArgs, DecoderCollatorA
 def validate_args(*args):
     for arg in args:
         if isinstance(arg, TrainingArgs):
-            if arg.dataset not in ["cdminix/librispeech-phones-and-mel"]:
+            if arg.dataset not in [
+                "cdminix/librispeech-phones-and-mel",
+                "cdminix/libritts-phones-and-mel",
+            ]:
                 raise ValueError(f"dataset {arg.dataset} not supported")
             if arg.lr_schedule not in ["linear_with_warmup", "cosine"]:
                 raise ValueError(f"lr_schedule {arg.lr_schedule} not supported")
