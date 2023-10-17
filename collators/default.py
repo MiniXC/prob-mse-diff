@@ -191,7 +191,7 @@ class DecoderCollator:
         prosody, phones, speaker = EncoderCollator.item_to_arrays(item)
         duration = prosody[:, 30]
         # denormalize
-        duration = np.round(duration * 50, 0).astype(np.int32)
+        duration = np.round(2**(duration * 8), 0).astype(np.int32)
         mel = np.array(Image.open(item["mel"])).T
         if mel.shape[0] > duration.sum():
             duration[-1] += mel.shape[0] - duration.sum()
