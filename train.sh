@@ -18,4 +18,11 @@ elif [ "$1" == "--machine" ] && [ "$2" == "v3-2" ]; then
     --valid_batch_size 16 \
     --lr 8.0e-5 \
     --n_steps 250000
+elif [ "$1" == "--machine" ] && [ "$2" == "v3-3" ]; then
+    accelerate launch scripts/train_byt5.py \
+    --wandb_mode online
+elif [ "$1" == "--machine" ] && [ "$2" == "v3-4" ]; then
+    accelerate launch scripts/train_byt5.py \
+    --wandb_mode online \
+    --add_speaker_embedding
 fi

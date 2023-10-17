@@ -17,7 +17,7 @@ class TrainingArgs:
     train_split: str = "train.other.500+train.clean.360+train.clean.100"
     speakers_in_validation: int = 100
     unseen_validation_split: str = "dev.other+dev.clean+test.other+test.clean"
-    n_steps: int = 250_000
+    n_steps: int = 25_000
     batch_size: int = 8
     valid_batch_size: int = 8
     seed: int = 0
