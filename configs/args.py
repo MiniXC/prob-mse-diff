@@ -22,7 +22,7 @@ class TrainingArgs:
     batch_size: int = 16
     valid_batch_size: int = 16
     seed: int = 0
-    dataset: str = "cdminix/librispeech-phones-and-mel"
+    dataset: str = "cdminix/libritts-phones-and-mel"
     log_every_n_steps: int = 100
     do_full_eval: bool = True
     do_save: bool = False
