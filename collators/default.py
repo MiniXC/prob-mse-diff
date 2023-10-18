@@ -14,6 +14,7 @@ class EncoderCollator:
         self.max_length = args.enc_max_length
         self.pack_factor = args.enc_pack_factor
         self.verbose = args.enc_verbose
+        self.pack_probability = (1 - args.enc_pack_prob)
         self.inference = inference
 
     @staticmethod
@@ -184,6 +185,7 @@ class DecoderCollator:
         self.max_length = args.dec_max_length
         self.pack_factor = args.dec_pack_factor
         self.verbose = args.dec_verbose
+        self.pack_probability = (1 - args.dec_pack_prob)
         self.inference = inference
 
     @staticmethod
@@ -193,8 +195,18 @@ class DecoderCollator:
         # denormalize
         duration = np.round(2**(duration * 8), 0).astype(np.int32)
         mel = np.array(Image.open(item["mel"])).T
+        # TODO: this should not be necessary, investigate why this is happening
         if mel.shape[0] > duration.sum():
-            duration[-1] += mel.shape[0] - duration.sum()
+            # add duration accross frames
+            duration_diff = mel.shape[0] - duration.sum()
+            duration_add = np.zeros(duration.shape[0], dtype=np.int32)
+            # ie if we need to add a third of the duration shape, duration add will be [1 , 0, 0 ,1 ,0 ,0 ...]
+            duration_add[::duration.shape[0] // duration_diff] = 1
+            rand_idx = np.random.randint(0, duration_add.shape[0])
+            if duration_add.sum() < duration_diff:
+                duration_add[rand_idx] += duration_diff - duration_add.sum()
+            elif duration_add.sum() > duration_diff:
+                duration_add[rand_idx] += duration_add.sum() - duration_diff
         elif mel.shape[0] < duration.sum():
             # pad mel
             mel = np.pad(
@@ -306,7 +318,7 @@ class DecoderCollator:
     def __call__(self, batch):
         items = [DecoderCollator.item_to_arrays(item) for item in batch]
         prosody, phones, speaker, mel = zip(*items)
-        pack_sequence = np.random.rand() > 0.1
+        pack_sequence = np.random.rand() > self.pack_probability
         pack_sequence = pack_sequence and not self.inference
         if pack_sequence:
             (

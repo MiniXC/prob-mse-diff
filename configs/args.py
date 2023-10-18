@@ -38,8 +38,8 @@ class TrainingArgs:
     ddpm_num_steps_inference: int = 20
     diffusion_scale: float = 0.7
     loss_type: str = "diffusion" # diffusion or mse
-    phone_mask_prob: float = 0.05
-    prosody_mask_prob: float = 0.25
+    phone_mask_prob: float = 0.0
+    prosody_mask_prob: float = 0.0
     bf16: bool = True
     n_epochs: int = None # this is set by the trainer, changing this value will have no effect
 
@@ -49,6 +49,7 @@ class EncoderCollatorArgs:
     enc_max_length: int = 512
     enc_pack_factor: int = 4
     enc_verbose: bool = False
+    enc_pack_prob: float = 0.95
 
 
 @dataclass
@@ -56,6 +57,7 @@ class DecoderCollatorArgs:
     dec_max_length: int = 2048
     dec_pack_factor: int = 4
     dec_verbose: bool = False
+    dec_pack_prob: float = 0.95
 
 
 @dataclass
