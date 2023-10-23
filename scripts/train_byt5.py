@@ -237,6 +237,16 @@ def evaluate():
             )
             cer = CharErrorRate()
             cer_val = cer(outputs, gt_outputs)
+            # without silence tokens
+            outputs_no_silence = [
+                " ".join([x for x in y.split(" ") if "<s" not in x])
+                for y in outputs
+            ]
+            gt_outputs_no_silence = [
+                " ".join([x for x in y.split(" ") if "<s" not in x])
+                for y in gt_outputs
+            ]
+            cer_no_silence = cer(outputs_no_silence, gt_outputs_no_silence)
             wandb_log(
                 "val",
                 {
@@ -244,10 +254,12 @@ def evaluate():
                     "outputs": outputs,
                     "gt_outputs": gt_outputs,
                     "cer": cer_val,
+                    "cer_no_silence": cer_no_silence,
                 },
                 print_log=False,
             )
             console_print(f"[green]CER[/green]: {cer_val}")
+            console_print(f"[green]CER (no silence)[/green]: {cer_no_silence}")
             # print first 5
             for i in range(5):
                 console_print(f"[green]input[/green]: {inputs[i]}")

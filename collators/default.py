@@ -200,9 +200,9 @@ class DecoderCollator:
             mel = np.zeros((int(duration.sum()), 80))
             print(f"Failed to load mel for {item['mel']}")
         if mel.shape[0] > duration.sum():
-            print(f"Mel is longer than duration for {item['mel']}")
-            print(f"Mel length: {mel.shape[0]}")
-            print(f"Duration length: {duration.sum()}")
+            # print(f"Mel is longer than duration for {item['mel']}")
+            # print(f"Mel length: {mel.shape[0]}")
+            # print(f"Duration length: {duration.sum()}")
             max_dur_idx = np.argmax(duration)
             duration[max_dur_idx] += mel.shape[0] - duration.sum()
         # repeat prosody to match mel using duration
