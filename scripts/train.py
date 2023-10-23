@@ -26,6 +26,9 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 from tqdm.auto import tqdm
 import yaml
 from rich.console import Console
+from PIL import Image
+from simple_hifigan import Synthesiser
+import torchaudio
 
 # plotting
 import matplotlib.pyplot as plt
@@ -261,9 +264,18 @@ def train_epoch(epoch):
                 pbar.set_postfix({"loss": f"{last_loss:.3f}"})
 
 
+def denorm_mel(mel):
+    mel = mel.cpu().numpy()
+    mel_range = (-11, 2)
+    mel_denorm = (mel * (mel_range[1] - mel_range[0])) + mel_range[0]
+    mel_denorm = np.flip(mel_denorm, axis=1)
+    return mel_denorm.copy()
+
 def evaluate():
     # pass the first batch through the pipeline
     checkpoint_path = save_checkpoint("temp")
+    synth = Synthesiser()
+    Path("figures/val").mkdir(exist_ok=True, parents=True)
     if accelerator.is_main_process:
         eval_model = MODEL_CLASS.from_pretrained(checkpoint_path)
         eval_model.eval()
@@ -303,15 +315,26 @@ def evaluate():
                         noise, packed_mask, timestep, packed_phones, packed_speaker
                     )
                 output = output * packed_mask.unsqueeze(-1).cpu()
-                fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(10, 10))
                 for b in range(bsz):
-                    axes[b][0].imshow(output[b][0].T, vmin=-1, vmax=1)
-                    axes[b][1].imshow(
-                        packed_prosody[b].cpu()[0].numpy().T, vmin=-1, vmax=1
+                    # save as images
+                    img = Image.fromarray(
+                        (output[b][0].numpy().T * 255).astype(np.uint8)
                     )
-                plt.tight_layout()
-                plt.savefig("figures/current_val.png")
-                plt.close()
+                    img.save(f"figures/val/{b}_output.png")
+                    img = Image.fromarray(
+                        (packed_prosody[b].cpu()[0].numpy().T * 255).astype(np.uint8)
+                    )
+                    img.save(f"figures/val/{b}_target.png")
+                    # log to wandb
+                    wandb_log(
+                        "val",
+                        {
+                            f"{b}_output_img": wandb.Image(f"figures/val/{b}_output.png"),
+                            f"{b}_target_img": wandb.Image(f"figures/val/{b}_target.png"),
+                        },
+                        print_log=False,
+                    )
+
                 mse = F.mse_loss(torch.tensor(output), packed_prosody.cpu())
                 # log to wandb
                 wandb_log(
@@ -364,13 +387,35 @@ def evaluate():
                         packed_prosody,
                     )
                 output = output * packed_mask.unsqueeze(-1).cpu()
-                fig, axes = plt.subplots(nrows=bsz, ncols=2, figsize=(15, 30))
+
                 for b in range(bsz):
-                    axes[b][0].imshow(output[b][0].T, vmin=-1, vmax=1)
-                    axes[b][1].imshow(packed_mel[b].cpu()[0].numpy().T, vmin=-1, vmax=1)
-                plt.tight_layout()
-                plt.savefig("figures/current_val.png")
-                plt.close()
+                    # save as images
+                    img = Image.fromarray(
+                        (output[b][0].numpy().T * 255).astype(np.uint8)
+                    )
+                    img.save(f"figures/val/{b}_output.png")
+                    img = Image.fromarray(
+                        (packed_mel[b].cpu()[0].numpy().T * 255).astype(np.uint8)
+                    )
+                    img.save(f"figures/val/{b}_target.png")
+                    denormed_output = denorm_mel(output[b][0])
+                    denormed_target = denorm_mel(packed_prosody[b].cpu()[0])
+                    wav = synth(denormed_output)
+                    torchaudio.save(f"figures/val/{b}_output.wav", torch.from_numpy(wav), 22050)
+                    wav = synth(denormed_target)
+                    torchaudio.save(f"figures/val/{b}_target.wav", torch.from_numpy(wav), 22050)
+                    # log to wandb
+                    wandb_log(
+                        "val",
+                        {
+                            f"{b}_output_img": wandb.Image(f"figures/val/{b}_output.png"),
+                            f"{b}_target_img": wandb.Image(f"figures/val/{b}_target.png"),
+                            f"{b}_output_wav": wandb.Audio(f"figures/val/{b}_output.wav"),
+                            f"{b}_target_wav": wandb.Audio(f"figures/val/{b}_target.wav"),
+                        },
+                        print_log=False,
+                    )
+
                 mse = F.mse_loss(torch.tensor(output), packed_mel.cpu())
                 # log to wandb
                 wandb_log(
