@@ -18,7 +18,8 @@ elif [ "$1" == "--machine" ] && [ "$2" == "v3-2" ]; then
     --batch_size 16 \
     --valid_batch_size 16 \
     --lr 8.0e-5 \
-    --n_steps 250000
+    --n_steps 250000 \
+    --load_from_checkpoint checkpoints/encoder_diffusion_v3/temp
 elif [ "$1" == "--machine" ] && [ "$2" == "v3-3" ]; then
     accelerate launch scripts/train_byt5.py \
     --run_name byt5_speaker_v3 \
