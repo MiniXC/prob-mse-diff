@@ -36,7 +36,7 @@ class TrainingArgs:
     ddpm_num_steps: int = 1000
     ddpm_beta_schedule: str = "linear"
     ddpm_num_steps_inference: int = 20
-    diffusion_scale: float = 0.7
+    diffusion_scale: float = 1.0
     loss_type: str = "diffusion" # diffusion or mse
     phone_mask_prob: float = 0.0
     prosody_mask_prob: float = 0.0
