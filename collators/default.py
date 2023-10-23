@@ -193,13 +193,16 @@ class DecoderCollator:
         prosody, phones, speaker = EncoderCollator.item_to_arrays(item)
         duration = prosody[:, 30]
         # denormalize
-        duration = np.ceil(2**(duration * 8)).astype(np.int32)
+        duration = np.ceil(2**(duration * 11)).astype(np.int32)
         try:
             mel = np.array(Image.open(item["mel"])).T
         except:
             mel = np.zeros((int(duration.sum()), 80))
             print(f"Failed to load mel for {item['mel']}")
         if mel.shape[0] > duration.sum():
+            print(f"Mel is longer than duration for {item['mel']}")
+            print(f"Mel length: {mel.shape[0]}")
+            print(f"Duration length: {duration.sum()}")
             max_dur_idx = np.argmax(duration)
             duration[max_dur_idx] += mel.shape[0] - duration.sum()
         # repeat prosody to match mel using duration

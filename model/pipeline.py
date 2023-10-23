@@ -6,6 +6,7 @@ from diffusers.utils.torch_utils import randn_tensor
 from diffusers import DDPMScheduler
 import imageio
 import yaml
+from transformers.utils.hub import cached_file
 
 from configs.args import ModelArgs, TrainingArgs
 
