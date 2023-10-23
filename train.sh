@@ -37,5 +37,6 @@ elif [ "$1" == "--test-decoder" ]; then
         --wandb_mode offline \
         --train_type decoder \
         --model_type decoder \
-        --batch_size 8
+        --batch_size 8 \
+        --evaluate_only
 fi

@@ -266,9 +266,10 @@ def train_epoch(epoch):
 
 def denorm_mel(mel):
     mel = mel.cpu().numpy()
+    mel = np.clip(mel, 0, 1)
     mel_range = (-11, 2)
     mel_denorm = (mel * (mel_range[1] - mel_range[0])) + mel_range[0]
-    mel_denorm = np.flip(mel_denorm, axis=1)
+    mel_denorm = np.flip(mel_denorm, axis=0)
     return mel_denorm.copy()
 
 def evaluate():
@@ -318,7 +319,7 @@ def evaluate():
                 for b in range(bsz):
                     # save as images
                     img = Image.fromarray(
-                        (output[b][0].numpy().T * 255).astype(np.uint8)
+                        (np.clip(output[b][0].numpy().T, 0, 1) * 255).astype(np.uint8)
                     )
                     img.save(f"figures/val/{b}_output.png")
                     img = Image.fromarray(
@@ -340,7 +341,6 @@ def evaluate():
                 wandb_log(
                     "val",
                     {
-                        "inference_image": wandb.Image(fig),
                         "mse": mse.item(),
                     },
                 )
@@ -390,16 +390,18 @@ def evaluate():
 
                 for b in range(bsz):
                     # save as images
+                    b_output = output[b][packed_mask[b].cpu().bool()]
+                    b_packed_mel = packed_mel[b][packed_mask[b].cpu().bool()]
                     img = Image.fromarray(
-                        (output[b][0].numpy().T * 255).astype(np.uint8)
+                        (b_output.numpy().T * 255).astype(np.uint8)
                     )
                     img.save(f"figures/val/{b}_output.png")
                     img = Image.fromarray(
-                        (packed_mel[b].cpu()[0].numpy().T * 255).astype(np.uint8)
+                        (b_packed_mel.cpu().numpy().T * 255).astype(np.uint8)
                     )
                     img.save(f"figures/val/{b}_target.png")
-                    denormed_output = denorm_mel(output[b][0])
-                    denormed_target = denorm_mel(packed_prosody[b].cpu()[0])
+                    denormed_output = denorm_mel(b_output.transpose(0, 1))
+                    denormed_target = denorm_mel(b_packed_mel.cpu().transpose(0, 1))
                     wav = synth(denormed_output)
                     torchaudio.save(f"figures/val/{b}_output.wav", torch.from_numpy(wav), 22050)
                     wav = synth(denormed_target)
@@ -421,7 +423,6 @@ def evaluate():
                 wandb_log(
                     "val",
                     {
-                        "inference_image": wandb.Image(fig),
                         "mse": mse.item(),
                     },
                 )
