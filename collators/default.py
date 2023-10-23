@@ -26,7 +26,7 @@ class EncoderCollator:
     def item_to_arrays(item):
         prosody = Image.open(item["prosody"])
         prosody = np.array(prosody)
-        durs = prosody[-1]
+        durs = prosody[-1].copy()
         durs = (durs - durs.mean()) / (durs.std()+1e-6)
         cwt_result = EncoderCollator.compute_cwt(durs)
         cwt_result = (
@@ -193,28 +193,15 @@ class DecoderCollator:
         prosody, phones, speaker = EncoderCollator.item_to_arrays(item)
         duration = prosody[:, 30]
         # denormalize
-        duration = np.round(2**(duration * 8), 0).astype(np.int32)
-        mel = np.array(Image.open(item["mel"])).T
-        # TODO: this should not be necessary, investigate why this is happening
+        duration = np.ceil(2**(duration * 8)).astype(np.int32)
+        try:
+            mel = np.array(Image.open(item["mel"])).T
+        except:
+            mel = np.zeros((int(duration.sum()), 80))
+            print(f"Failed to load mel for {item['mel']}")
         if mel.shape[0] > duration.sum():
-            # add duration accross frames
-            duration_diff = mel.shape[0] - duration.sum()
-            duration_add = np.zeros(duration.shape[0], dtype=np.int32)
-            # ie if we need to add a third of the duration shape, duration add will be [1 , 0, 0 ,1 ,0 ,0 ...]
-            duration_add[::duration.shape[0] // duration_diff] = 1
-            rand_idx = np.random.randint(0, duration_add.shape[0])
-            if duration_add.sum() < duration_diff:
-                duration_add[rand_idx] += duration_diff - duration_add.sum()
-            elif duration_add.sum() > duration_diff:
-                duration_add[rand_idx] += duration_add.sum() - duration_diff
-        elif mel.shape[0] < duration.sum():
-            # pad mel
-            mel = np.pad(
-                mel,
-                ((0, duration.sum() - mel.shape[0]), (0, 0)),
-                mode="constant",
-                constant_values=0,
-            )
+            max_dur_idx = np.argmax(duration)
+            duration[max_dur_idx] += mel.shape[0] - duration.sum()
         # repeat prosody to match mel using duration
         prosody = np.repeat(prosody, duration, axis=0)
         # repeat speaker to match mel using duration

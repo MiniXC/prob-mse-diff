@@ -161,7 +161,7 @@ def train_epoch(epoch):
                     device=packed_prosody.device,
                 ).long()
                 if training_args.loss_type == "diffusion":
-                    packed_prosody = (packed_prosody * 2 - 1) * training_args.diffusion_scale
+                    packed_prosody = packed_prosody * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
                     phone_mask = torch.rand(bsz, packed_phones.shape[1]) > training_args.phone_mask_prob
                     packed_phones = packed_phones * phone_mask
@@ -193,7 +193,7 @@ def train_epoch(epoch):
                     device=packed_mel.device,
                 ).long()
                 if training_args.loss_type == "diffusion":
-                    packed_mel = (packed_mel * 2 - 1) * training_args.diffusion_scale
+                    packed_mel = packed_mel * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
                     phone_mask = torch.rand(bsz, packed_phones.shape[1]) > training_args.phone_mask_prob
                     prosody_mask = torch.rand(bsz, packed_prosody.shape[1], 1) > training_args.prosody_mask_prob
@@ -399,7 +399,7 @@ def evaluate_loss_only():
                     device=packed_prosody.device,
                 ).long()
                 if training_args.loss_type == "diffusion":
-                    packed_prosody = (packed_prosody * 2 - 1) * training_args.diffusion_scale
+                    packed_prosody = packed_prosody * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
                     output = model(
                         noisy_, packed_mask, timesteps, packed_phones, packed_speaker
@@ -429,7 +429,7 @@ def evaluate_loss_only():
                     device=packed_mel.device,
                 ).long()
                 if training_args.loss_type == "diffusion":
-                    packed_mel = (packed_mel * 2 - 1) * training_args.diffusion_scale
+                    packed_mel = packed_mel * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
                     output = model(
                         noisy_,

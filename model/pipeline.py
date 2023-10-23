@@ -76,12 +76,12 @@ class DDPMPipeline(DiffusionPipeline):
         mask = mask.to(self._device)
 
         if self.model_args.model_type == "decoder":
-            prosody_mask = torch.rand((batch_size, prosody_cond.shape[1], 1), device=self._device) < self.prosody_mask_prob
+            prosody_mask = torch.rand((batch_size, prosody_cond.shape[1], 1), device=self._device) > self.prosody_mask_prob
             prosody_cond = prosody_cond * prosody_mask
 
         for t in self.progress_bar(self.scheduler.timesteps):
 
-            image = self.scheduler.scale_model_input(image, t)
+            # image = self.scheduler.scale_model_input(image, t)
 
             # 1. predict noise model_output
             if self.model_args.model_type == "encoder":
@@ -120,8 +120,8 @@ class DDPMPipeline(DiffusionPipeline):
 
         image = image.cpu()
         if self.scale is not None:
-            image = torch.clamp(image, -self.scale, self.scale)
-            image = (image + self.scale) / (2 * self.scale)
+            # image = torch.clamp(image, -self.scale, self.scale)
+            image = image / self.scale
 
         return image
 
