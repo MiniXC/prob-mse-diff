@@ -33,7 +33,7 @@ elif [ "$1" == "--machine" ] && [ "$2" == "v3-4" ]; then
     --load_from_checkpoint checkpoints/byt5_v3/temp
 elif [ "$1" == "--test-decoder" ]; then
     /usr/bin/python scripts/train.py \
-        --run_name decoder_diffusion_v3 \
+        --run_name decoder_diffusion_v4 \
         --wandb_mode offline \
         --train_type decoder \
         --model_type decoder \
