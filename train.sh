@@ -1,6 +1,6 @@
 if [ "$1" == "--machine" ] && [ "$2" == "v3-1" ]; then
     accelerate launch scripts/train.py \
-    --run_name decoder_diffusion_v4 \
+    --run_name decoder_diffusion_v5 \
     --wandb_mode online \
     --train_type decoder \
     --model_type decoder \

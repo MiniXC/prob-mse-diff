@@ -38,8 +38,7 @@ class TrainingArgs:
     ddpm_num_steps_inference: int = 20
     diffusion_scale: float = 1.0
     loss_type: str = "diffusion" # diffusion or mse
-    phone_mask_prob: float = 0.0
-    prosody_mask_prob: float = 0.0
+    prosody_guidance: bool = True
     bf16: bool = False
     n_epochs: int = None # this is set by the trainer, changing this value will have no effect
 

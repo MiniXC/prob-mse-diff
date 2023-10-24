@@ -36,7 +36,6 @@ class DDPMPipeline(DiffusionPipeline):
         self.unet.eval()
         self._device = device
         self.scale = training_args.diffusion_scale
-        self.prosody_mask_prob = training_args.prosody_mask_prob
 
     @torch.no_grad()
     def __call__(
@@ -45,6 +44,7 @@ class DDPMPipeline(DiffusionPipeline):
         phone_cond,
         speaker_cond,
         prosody_cond=None,
+        prosody_guidance=1.0,
         batch_size=1,
         generator=None,
         mask=None,
@@ -77,7 +77,7 @@ class DDPMPipeline(DiffusionPipeline):
         mask = mask.to(self._device)
 
         if self.model_args.model_type == "decoder":
-            prosody_mask = torch.rand((batch_size, prosody_cond.shape[1], 1), device=self._device) > self.prosody_mask_prob
+            prosody_mask = torch.rand((batch_size, prosody_cond.shape[1], 1), device=self._device) <= prosody_guidance
             prosody_cond = prosody_cond * prosody_mask
 
         for t in self.progress_bar(self.scheduler.timesteps):

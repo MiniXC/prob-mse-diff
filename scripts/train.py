@@ -166,8 +166,6 @@ def train_epoch(epoch):
                 if training_args.loss_type == "diffusion":
                     packed_prosody = packed_prosody * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
-                    # phone_mask = torch.rand(bsz, packed_phones.shape[1]) > training_args.phone_mask_prob
-                    # packed_phones = packed_phones * phone_mask
                     output = model(
                         noisy_, packed_mask, timesteps, packed_phones, packed_speaker
                     )
@@ -198,10 +196,16 @@ def train_epoch(epoch):
                 if training_args.loss_type == "diffusion":
                     packed_mel = packed_mel * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
-                    # phone_mask = torch.rand(bsz, packed_phones.shape[1]) > training_args.phone_mask_prob
-                    # prosody_mask = torch.rand(bsz, packed_prosody.shape[1], 1) > training_args.prosody_mask_prob
-                    # packed_phones = packed_phones * phone_mask
-                    # packed_prosody = packed_prosody * prosody_mask
+                    if training_args.prosody_guidance:
+                        prosody_threshold = np.random.uniform(0.0, 1.0)
+                        # 5% chance of no prosody guidance, 5% chance of full prosody guidance
+                        other_prob = np.random.uniform(0.0, 1.0)
+                        if other_prob < 0.05:
+                            prosody_threshold = 0
+                        elif other_prob > 0.95:
+                            prosody_threshold = 1
+                    prosody_mask = torch.rand(bsz, packed_prosody.shape[1], 1) <= prosody_threshold
+                    packed_prosody = packed_prosody * prosody_mask
                     output = model(
                         noisy_,
                         packed_mask,
@@ -296,8 +300,6 @@ def evaluate():
                 )
                 bsz = packed_prosody.shape[0]
                 if training_args.loss_type == "diffusion":
-                    # phone_mask = torch.rand(bsz, packed_phones.shape[1]) > training_args.phone_mask_prob
-                    # packed_phones = packed_phones * phone_mask
                     output = pipeline(
                         training_args.ddpm_num_steps_inference, packed_phones, packed_speaker, batch_size=bsz, mask=packed_mask
                     )
@@ -353,19 +355,20 @@ def evaluate():
                     packed_mask,
                 ) = next(iter(val_dl))
                 bsz = packed_mel.shape[0]
+                threshold_outputs = []
                 if training_args.loss_type == "diffusion":
-                    # phone_mask = torch.rand(bsz, packed_phones.shape[1]) > training_args.phone_mask_prob
-                    # prosody_mask = torch.rand(bsz, packed_prosody.shape[1], 1) > training_args.prosody_mask_prob
-                    # packed_phones = packed_phones * phone_mask
-                    # packed_prosody = packed_prosody * prosody_mask
-                    output = pipeline(
-                        training_args.ddpm_num_steps_inference,
-                        packed_phones,
-                        packed_speaker,
-                        packed_prosody,
-                        batch_size=bsz,
-                        mask=packed_mask,
-                    )
+                    for prosody_threshold in [0.0, 0.5, 1.0]:
+                        output = pipeline(
+                            training_args.ddpm_num_steps_inference,
+                            packed_phones,
+                            packed_speaker,
+                            packed_prosody,
+                            batch_size=bsz,
+                            mask=packed_mask,
+                            prosody_guidance=prosody_threshold,
+                        )
+                        output = output * packed_mask.unsqueeze(-1).cpu()
+                        threshold_outputs.append(output)
                 elif training_args.loss_type == "mse":
                     noise = torch.randn(packed_mel.shape).to("cpu")
                     packed_mask = packed_mask.to("cpu")
@@ -378,45 +381,52 @@ def evaluate():
                     packed_phones = packed_phones.to("cpu")
                     packed_speaker = packed_speaker.to("cpu")
                     packed_prosody = packed_prosody.to("cpu")
-                    output = eval_model(
-                        noise,
-                        packed_mask,
-                        timestep,
-                        packed_phones,
-                        packed_speaker,
-                        packed_prosody,
-                    )
-                output = output * packed_mask.unsqueeze(-1).cpu()
+                    for prosody_threshold in [0.0, 0.5, 1.0]:
+                        prosody_mask = torch.rand(bsz, packed_prosody.shape[1], 1) <= prosody_threshold
+                        packed_prosody = packed_prosody * prosody_mask
+                        output = eval_model(
+                            noise,
+                            packed_mask,
+                            timestep,
+                            packed_phones,
+                            packed_speaker,
+                            packed_prosody,
+                        )
+                        output = output * packed_mask.unsqueeze(-1).cpu()
+                        threshold_outputs.append(output)
 
                 for b in range(bsz):
-                    # save as images
-                    b_output = output[b][packed_mask[b].cpu().bool()]
-                    b_packed_mel = packed_mel[b][packed_mask[b].cpu().bool()]
-                    img = Image.fromarray(
-                        (b_output.numpy().T * 255).astype(np.uint8)
-                    )
-                    img.save(f"figures/val/{b}_output.png")
-                    img = Image.fromarray(
-                        (b_packed_mel.cpu().numpy().T * 255).astype(np.uint8)
-                    )
-                    img.save(f"figures/val/{b}_target.png")
-                    denormed_output = denorm_mel(b_output.transpose(0, 1))
-                    denormed_target = denorm_mel(b_packed_mel.cpu().transpose(0, 1))
-                    wav = synth(denormed_output)
-                    torchaudio.save(f"figures/val/{b}_output.wav", torch.from_numpy(wav), 22050)
-                    wav = synth(denormed_target)
-                    torchaudio.save(f"figures/val/{b}_target.wav", torch.from_numpy(wav), 22050)
-                    # log to wandb
-                    wandb_log(
-                        "val",
-                        {
-                            f"{b}_output_img": wandb.Image(f"figures/val/{b}_output.png"),
-                            f"{b}_target_img": wandb.Image(f"figures/val/{b}_target.png"),
-                            f"{b}_output_wav": wandb.Audio(f"figures/val/{b}_output.wav"),
-                            f"{b}_target_wav": wandb.Audio(f"figures/val/{b}_target.wav"),
-                        },
-                        print_log=False,
-                    )
+                    thresholds = ["0p", "50p", "100p"]
+                    for i, output in enumerate(threshold_outputs):
+                        t = thresholds[i]
+                        # save as images
+                        b_output = output[b][packed_mask[b].cpu().bool()]
+                        b_packed_mel = packed_mel[b][packed_mask[b].cpu().bool()]
+                        img = Image.fromarray(
+                            (b_output.numpy().T * 255).astype(np.uint8)
+                        )
+                        img.save(f"figures/val/{b}_{t}_output.png")
+                        img = Image.fromarray(
+                            (b_packed_mel.cpu().numpy().T * 255).astype(np.uint8)
+                        )
+                        img.save(f"figures/val/{b}_{t}_target.png")
+                        denormed_output = denorm_mel(b_output.transpose(0, 1))
+                        denormed_target = denorm_mel(b_packed_mel.cpu().transpose(0, 1))
+                        wav = synth(denormed_output)
+                        torchaudio.save(f"figures/val/{b}_{t}_output.wav", torch.from_numpy(wav), 22050)
+                        wav = synth(denormed_target)
+                        torchaudio.save(f"figures/val/{b}_{t}_target.wav", torch.from_numpy(wav), 22050)
+                        # log to wandb
+                        wandb_log(
+                            "val",
+                            {
+                                f"{b}_{t}_output_img": wandb.Image(f"figures/val/{b}_{t}_output.png"),
+                                f"{b}_{t}_target_img": wandb.Image(f"figures/val/{b}_{t}_target.png"),
+                                f"{b}_{t}_output_wav": wandb.Audio(f"figures/val/{b}_{t}_output.wav"),
+                                f"{b}_{t}_target_wav": wandb.Audio(f"figures/val/{b}_{t}_target.wav"),
+                            },
+                            print_log=False,
+                        )
 
                 mse = F.mse_loss(torch.tensor(output), packed_mel.cpu())
                 # log to wandb
