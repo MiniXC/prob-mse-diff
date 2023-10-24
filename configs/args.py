@@ -40,7 +40,7 @@ class TrainingArgs:
     loss_type: str = "diffusion" # diffusion or mse
     phone_mask_prob: float = 0.0
     prosody_mask_prob: float = 0.0
-    bf16: bool = True
+    bf16: bool = False
     n_epochs: int = None # this is set by the trainer, changing this value will have no effect
 
 
