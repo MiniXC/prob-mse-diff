@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 @dataclass
 class End2EndArgs:
-    dataset: str = "cdminix/librispeech-phones-and-mel"
+    dataset: str = "cdminix/libritts-phones-and-mel"
     train_split: str = "train.other.500+train.clean.360+train.clean.100"
     speakers_in_validation: int = 100
     seed: int = 0
@@ -12,12 +12,12 @@ class End2EndArgs:
     wandb_dir: str = "wandb"
     batch_size: int = 8
     g2p_tokenizer: str = "google/byt5-small"
-    g2p_model: str = "models/byt5_baseline_speaker_32k"
-    encoder_model: str = "models/baseline_encoder_diffusion_249k"
-    decoder_model: str = "models/decoder_diffusion_v2_107k"
+    g2p_model: str = "models/v5/byt5_speaker"
+    encoder_model: str = "models/v5/encoder_diffusion_170k"
+    decoder_model: str = "models/v5/decoder_diffusion_64k"
     ddpm_num_steps: int = 1000
     ddpm_beta_schedule: str = "linear"
-    steps: int = 20
+    steps: int = 40
     enc_length: int = 512
     dec_length: int = 2048
     teacher_force_encoder: bool = False
@@ -25,3 +25,4 @@ class End2EndArgs:
     perform_on_unseen_speaker: bool = False
     resynthesis: bool = True
     scale: float = None
+    prosody_guidance: float = 1.0
