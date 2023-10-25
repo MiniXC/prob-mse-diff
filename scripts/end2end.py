@@ -68,9 +68,8 @@ def prepare_for_decoder(item, item_for_encoder, prosody):
     prosody = prosody.numpy()
     duration = prosody[:, 30]
     # denormalize
-    duration = np.round(duration * 50, 0).astype(np.int32)
-    # make sure duration is > 0
-    duration[duration < 1] = 1
+    duration = np.ceil(2**(duration * 11)).astype(np.int32)
+    print(duration)
     
     phones = item_for_encoder["phones"][0].numpy()
     speaker = item_for_encoder["speaker"][0].numpy()
@@ -151,7 +150,7 @@ def main():
         dataset = load_dataset(args.dataset, split=args.unseen_validation_split)
 
     first_item = dataset[0]
-    first_item["text"] = "great was their mutual astonishment and joy when they recognised each other the prince exclaiming is it possible great was their mutual astonishment and joy when they recognised each other the prince exclaiming is it possible great was their mutual astonishment and joy when they recognised each other the prince exclaiming is it possible"
+    first_item["text"] = 'Das ist ein Test in dem ich versuche, Deutsch zu sprechen, obwohl ich eigentlich Englisch spreche.'
     first_item_g2p = prepare_for_g2p(first_item, tokenizer)
 
     
@@ -238,6 +237,7 @@ def main():
         first_item_decoder["prosody"],
         batch_size=1,
         mask=first_item_decoder["mask"],
+        prosody_guidance=args.prosody_guidance,
     )[0][0]
     decoder_result = decoder_result[first_item_decoder["mask"][0]]
     decoder_result = torch.clamp(decoder_result, 0, 1)
