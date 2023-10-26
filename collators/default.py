@@ -6,16 +6,29 @@ from scipy.signal import cwt, ricker
 
 from configs.args import EncoderCollatorArgs, DecoderCollatorArgs
 
+from transformers import AutoTokenizer, AutoModelForMaskedLM
+
 WAVELET_WIDTHS = np.arange(1, 10, 1)
 
 
 class EncoderCollator:
-    def __init__(self, args: EncoderCollatorArgs, inference=False):
+    def __init__(
+        self,
+        args: EncoderCollatorArgs,
+        inference=False,
+    ):
         self.max_length = args.enc_max_length
         self.pack_factor = args.enc_pack_factor
         self.verbose = args.enc_verbose
-        self.pack_probability = (1 - args.enc_pack_prob)
+        self.pack_probability = 1 - args.enc_pack_prob
         self.inference = inference
+        if args.lm_condition is not None:
+            self.lm_tokenizer = AutoTokenizer.from_pretrained(args.lm_condition)
+            self.lm_model = AutoModelForMaskedLM.from_pretrained(args.lm_condition)
+            self.lm_max_length = args.lm_condition_max_length
+            self.lm_condition = True
+        else:
+            self.lm_condition = False
 
     @staticmethod
     def compute_cwt(duration_array):
@@ -27,7 +40,7 @@ class EncoderCollator:
         prosody = Image.open(item["prosody"])
         prosody = np.array(prosody)
         durs = prosody[-1].copy()
-        durs = (durs - durs.mean()) / (durs.std()+1e-6)
+        durs = (durs - durs.mean()) / (durs.std() + 1e-6)
         cwt_result = EncoderCollator.compute_cwt(durs)
         cwt_result = (
             (cwt_result - cwt_result.min())
@@ -127,13 +140,31 @@ class EncoderCollator:
     def __call__(self, batch):
         items = [EncoderCollator.item_to_arrays(item) for item in batch]
         prosody, phones, speaker = zip(*items)
-        pack_sequence = np.random.rand() > 0.1
+        pack_sequence = np.random.rand() > self.pack_probability
         pack_sequence = pack_sequence or self.inference
         if pack_sequence:
             packed_prosody, packed_phones, packed_speaker, packed_mask = self.pack(
                 prosody, phones, speaker
             )
         else:
+            # only use lm_condition if not packing
+            if self.lm_condition:
+                texts = [
+                    batch[i]["text"] for i in range(len(prosody) // self.pack_factor)
+                ]
+                lm_inputs = self.lm_tokenizer(
+                    texts,
+                    padding=True,
+                    truncation=True,
+                    max_length=self.lm_max_length,
+                    return_tensors="pt",
+                    pad_to_multiple_of=self.lm_max_length,
+                )
+                with torch.no_grad():
+                    lm_outputs = self.lm_model(**lm_inputs, output_hidden_states=True)
+                lm_hidden_states = lm_outputs.hidden_states
+                print(lm_hidden_states.shape)
+
             # use the first half of the batch and pad to self.max_length
             packed_prosody = torch.zeros(
                 len(prosody) // self.pack_factor, self.max_length, prosody[0].shape[1]
@@ -185,7 +216,7 @@ class DecoderCollator:
         self.max_length = args.dec_max_length
         self.pack_factor = args.dec_pack_factor
         self.verbose = args.dec_verbose
-        self.pack_probability = (1 - args.dec_pack_prob)
+        self.pack_probability = 1 - args.dec_pack_prob
         self.inference = inference
 
     @staticmethod
@@ -193,7 +224,7 @@ class DecoderCollator:
         prosody, phones, speaker = EncoderCollator.item_to_arrays(item)
         duration = prosody[:, 30]
         # denormalize
-        duration = np.ceil(2**(duration * 11)).astype(np.int32)
+        duration = np.ceil(2 ** (duration * 11)).astype(np.int32)
         try:
             mel = np.array(Image.open(item["mel"])).T
         except:
@@ -212,7 +243,7 @@ class DecoderCollator:
         # repeat phones to match mel using duration
         phones = np.repeat(phones, duration, axis=0)
         # normalize mel
-        mel = (mel.astype(np.float32) / 255.0)
+        mel = mel.astype(np.float32) / 255.0
         return prosody, phones, speaker, mel
 
     def pack(self, prosody, phones, speaker, mel):

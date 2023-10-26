@@ -11,7 +11,7 @@ if [ "$1" == "--machine" ] && [ "$2" == "v3-1" ]; then
     --load_from_checkpoint checkpoints/decoder_diffusion_v4/temp
 elif [ "$1" == "--machine" ] && [ "$2" == "v3-2" ]; then
     accelerate launch scripts/train.py \
-    --run_name encoder_diffusion_v4 \
+    --run_name encoder_diffusion_v5 \
     --wandb_mode online \
     --train_type encoder \
     --model_type encoder \
@@ -19,7 +19,7 @@ elif [ "$1" == "--machine" ] && [ "$2" == "v3-2" ]; then
     --valid_batch_size 16 \
     --lr 8.0e-5 \
     --n_steps 250000 \
-    --load_from_checkpoint checkpoints/encoder_diffusion_v3/temp
+    --load_from_checkpoint checkpoints/encoder_diffusion_v4/temp
 elif [ "$1" == "--machine" ] && [ "$2" == "v3-3" ]; then
     accelerate launch scripts/train_byt5.py \
     --run_name byt5_speaker_v4 \
