@@ -122,7 +122,7 @@ class DDPMPipeline(DiffusionPipeline):
         image = image.cpu()
         if self.scale is not None:
             # image = torch.clamp(image, -self.scale, self.scale)
-            image = image / self.scale
+            image = ((image / self.scale) + 1) / 2
 
         return image
 
@@ -138,11 +138,6 @@ class DDPMPipeline(DiffusionPipeline):
         args = yaml.load(open(config_file, "r"), Loader=yaml.Loader)
         args = ModelArgs(**args)
         training_args = yaml.load(open(training_config_file, "r"), Loader=yaml.Loader)
-        # check if diffusion_scale is in training_args
-        if "diffusion_scale" not in training_args:
-            training_args["diffusion_scale"] = None
-        if "prosody_mask_prob" not in training_args:
-            training_args["prosody_mask_prob"] = None
         training_args = TrainingArgs(**training_args)
         scheduler = scheduler_class(
             num_train_timesteps=training_args.ddpm_num_steps,
