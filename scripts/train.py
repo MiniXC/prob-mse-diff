@@ -164,7 +164,7 @@ def train_epoch(epoch):
                     device=packed_prosody.device,
                 ).long()
                 if training_args.loss_type == "diffusion":
-                    packed_prosody = packed_prosody * training_args.diffusion_scale
+                    packed_prosody = (packed_prosody * 2 - 1) * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
                     output = model(
                         noisy_, packed_mask, timesteps, packed_phones, packed_speaker
@@ -194,7 +194,7 @@ def train_epoch(epoch):
                     device=packed_mel.device,
                 ).long()
                 if training_args.loss_type == "diffusion":
-                    packed_mel = packed_mel * training_args.diffusion_scale
+                    packed_mel = (packed_mel * 2 - 1) * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
                     if training_args.prosody_guidance:
                         prosody_threshold = np.random.uniform(0.0, 1.0)
@@ -402,6 +402,8 @@ def evaluate():
                         # save as images
                         b_output = output[b][packed_mask[b].cpu().bool()]
                         b_packed_mel = packed_mel[b][packed_mask[b].cpu().bool()]
+                        b_output = torch.clamp(b_output, 0, 1)
+                        b_packed_mel = torch.clamp(b_packed_mel, 0, 1)
                         img = Image.fromarray(
                             (b_output.numpy().T * 255).astype(np.uint8)
                         )
@@ -455,7 +457,7 @@ def evaluate_loss_only():
                     device=packed_prosody.device,
                 ).long()
                 if training_args.loss_type == "diffusion":
-                    packed_prosody = packed_prosody * training_args.diffusion_scale
+                    packed_prosody = (packed_prosody * 2 - 1) * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
                     output = model(
                         noisy_, packed_mask, timesteps, packed_phones, packed_speaker
@@ -485,7 +487,7 @@ def evaluate_loss_only():
                     device=packed_mel.device,
                 ).long()
                 if training_args.loss_type == "diffusion":
-                    packed_mel = packed_mel * training_args.diffusion_scale
+                    packed_mel = (packed_mel * 2 - 1) * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_mel, noise, timesteps)
                     output = model(
                         noisy_,

@@ -122,7 +122,7 @@ class DDPMPipeline(DiffusionPipeline):
         image = image.cpu()
         if self.scale is not None:
             # image = torch.clamp(image, -self.scale, self.scale)
-            image = image / self.scale
+            image = ((image / self.scale) + 1) / 2
 
         return image
 

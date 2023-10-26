@@ -36,7 +36,7 @@ class TrainingArgs:
     ddpm_num_steps: int = 1000
     ddpm_beta_schedule: str = "linear"
     ddpm_num_steps_inference: int = 20
-    diffusion_scale: float = 1.0
+    diffusion_scale: float = 0.7
     loss_type: str = "diffusion" # diffusion or mse
     prosody_guidance: bool = True
     bf16: bool = False
