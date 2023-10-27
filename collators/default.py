@@ -6,7 +6,7 @@ from scipy.signal import cwt, ricker
 
 from configs.args import EncoderCollatorArgs, DecoderCollatorArgs
 
-from transformers import AutoTokenizer, AutoModelForMaskedLM
+from transformers import AutoTokenizer
 
 WAVELET_WIDTHS = np.arange(1, 10, 1)
 
@@ -20,11 +20,10 @@ class EncoderCollator:
         self.max_length = args.enc_max_length
         self.pack_factor = args.enc_pack_factor
         self.verbose = args.enc_verbose
-        self.pack_probability = 1 - args.enc_pack_prob
+        self.pack_probability = args.enc_pack_prob
         self.inference = inference
         if args.lm_condition is not None:
             self.lm_tokenizer = AutoTokenizer.from_pretrained(args.lm_condition)
-            self.lm_model = AutoModelForMaskedLM.from_pretrained(args.lm_condition)
             self.lm_max_length = args.lm_condition_max_length
             self.lm_condition = True
         else:
@@ -140,7 +139,7 @@ class EncoderCollator:
     def __call__(self, batch):
         items = [EncoderCollator.item_to_arrays(item) for item in batch]
         prosody, phones, speaker = zip(*items)
-        pack_sequence = np.random.rand() > self.pack_probability
+        pack_sequence = np.random.rand() < self.pack_probability
         pack_sequence = pack_sequence or self.inference
         if pack_sequence:
             packed_prosody, packed_phones, packed_speaker, packed_mask = self.pack(
@@ -160,11 +159,6 @@ class EncoderCollator:
                     return_tensors="pt",
                     pad_to_multiple_of=self.lm_max_length,
                 )
-                with torch.no_grad():
-                    lm_outputs = self.lm_model(**lm_inputs, output_hidden_states=True)
-                lm_hidden_states = lm_outputs.hidden_states
-                print(lm_hidden_states.shape)
-
             # use the first half of the batch and pad to self.max_length
             packed_prosody = torch.zeros(
                 len(prosody) // self.pack_factor, self.max_length, prosody[0].shape[1]
@@ -208,7 +202,22 @@ class EncoderCollator:
                     packed_mask[i, :first_len] = torch.from_numpy(first_arr_mask)
         packed_prosody = packed_prosody.unsqueeze(1)
         packed_mask = packed_mask.unsqueeze(1)
-        return packed_prosody, packed_phones, packed_speaker, packed_mask
+        if self.lm_condition and not pack_sequence:
+            return (
+                packed_prosody,
+                packed_phones,
+                packed_speaker,
+                packed_mask,
+                lm_inputs,
+            )
+        else:
+            return (
+                packed_prosody,
+                packed_phones,
+                packed_speaker,
+                packed_mask,
+                None,
+            )
 
 
 class DecoderCollator:
@@ -216,7 +225,7 @@ class DecoderCollator:
         self.max_length = args.dec_max_length
         self.pack_factor = args.dec_pack_factor
         self.verbose = args.dec_verbose
-        self.pack_probability = 1 - args.dec_pack_prob
+        self.pack_probability = args.dec_pack_prob
         self.inference = inference
 
     @staticmethod
@@ -339,7 +348,7 @@ class DecoderCollator:
     def __call__(self, batch):
         items = [DecoderCollator.item_to_arrays(item) for item in batch]
         prosody, phones, speaker, mel = zip(*items)
-        pack_sequence = np.random.rand() > self.pack_probability
+        pack_sequence = np.random.rand() < self.pack_probability
         pack_sequence = pack_sequence and not self.inference
         if pack_sequence:
             (

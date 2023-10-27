@@ -9,7 +9,11 @@ sys.path.append(".")  # add root of project to path
 import torch
 from torch.utils.data import DataLoader
 from accelerate import Accelerator
-from transformers import get_linear_schedule_with_warmup, HfArgumentParser
+from transformers import (
+    get_linear_schedule_with_warmup,
+    HfArgumentParser,
+    AutoModelForMaskedLM,
+)
 from diffusers.optimization import get_scheduler
 from datasets import load_dataset
 import torch.nn.functional as F
@@ -50,6 +54,7 @@ from model.pipeline import DDPMPipeline
 from collators import get_collator
 
 MODEL_CLASS = CustomUNet2DConditionModel
+
 
 def print_and_draw_model(pack_factor):
     bsz = training_args.batch_size // pack_factor
@@ -144,6 +149,17 @@ def save_checkpoint(name_override=None):
     return checkpoint_path
 
 
+def get_lm_cond_and_mask(lm_inputs):
+    if lm_inputs is not None:
+        with torch.no_grad():
+            lm_cond = lm_model(**lm_inputs, output_hidden_states=True).hidden_states[-1]
+            lm_mask = lm_inputs["attention_mask"].to(lm_cond.device)
+    else:
+        lm_cond = None
+        lm_mask = None
+    return lm_cond, lm_mask
+
+
 def train_epoch(epoch):
     global global_step
     model.train()
@@ -154,7 +170,14 @@ def train_epoch(epoch):
     for batch in train_dl:
         with accelerator.accumulate(model):
             if training_args.train_type == "encoder":
-                packed_prosody, packed_phones, packed_speaker, packed_mask = batch
+                (
+                    packed_prosody,
+                    packed_phones,
+                    packed_speaker,
+                    packed_mask,
+                    lm_inputs,
+                ) = batch
+                lm_cond, lm_mask = get_lm_cond_and_mask(lm_inputs)
                 noise = torch.randn(packed_prosody.shape).to(packed_prosody.device)
                 bsz = packed_prosody.shape[0]
                 timesteps = torch.randint(
@@ -164,15 +187,29 @@ def train_epoch(epoch):
                     device=packed_prosody.device,
                 ).long()
                 if training_args.loss_type == "diffusion":
-                    packed_prosody = (packed_prosody * 2 - 1) * training_args.diffusion_scale
+                    packed_prosody = (
+                        packed_prosody * 2 - 1
+                    ) * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
                     output = model(
-                        noisy_, packed_mask, timesteps, packed_phones, packed_speaker
+                        noisy_,
+                        packed_mask,
+                        timesteps,
+                        packed_phones,
+                        packed_speaker,
+                        lm_cond=lm_cond,
+                        lm_mask=lm_mask,
                     )
                     loss = F.mse_loss(output, noise, reduction="none")
                 elif training_args.loss_type == "mse":
                     output = model(
-                        noise, packed_mask, timesteps, packed_phones, packed_speaker
+                        noise,
+                        packed_mask,
+                        timesteps,
+                        packed_phones,
+                        packed_speaker,
+                        lm_cond=lm_cond,
+                        lm_mask=lm_mask,
                     )
                     loss = F.mse_loss(output, packed_prosody, reduction="none")
                 loss = loss * packed_mask.unsqueeze(-1)
@@ -204,7 +241,9 @@ def train_epoch(epoch):
                             prosody_threshold = 0
                         elif other_prob > 0.95:
                             prosody_threshold = 1
-                    prosody_mask = torch.rand(bsz, packed_prosody.shape[1], 1) <= prosody_threshold
+                    prosody_mask = (
+                        torch.rand(bsz, packed_prosody.shape[1], 1) <= prosody_threshold
+                    )
                     packed_prosody = packed_prosody * prosody_mask
                     output = model(
                         noisy_,
@@ -276,6 +315,7 @@ def denorm_mel(mel):
     mel_denorm = np.flip(mel_denorm, axis=0)
     return mel_denorm.copy()
 
+
 def evaluate():
     # pass the first batch through the pipeline
     checkpoint_path = save_checkpoint("temp")
@@ -295,27 +335,48 @@ def evaluate():
             )
         with torch.no_grad():
             if training_args.train_type == "encoder":
-                packed_prosody, packed_phones, packed_speaker, packed_mask = next(
-                    iter(val_dl)
-                )
+                (
+                    packed_prosody,
+                    packed_phones,
+                    packed_speaker,
+                    packed_mask,
+                    lm_inputs,
+                ) = next(iter(val_dl))
+                lm_cond, lm_mask = get_lm_cond_and_mask(lm_inputs)
                 bsz = packed_prosody.shape[0]
                 if training_args.loss_type == "diffusion":
                     output = pipeline(
-                        training_args.ddpm_num_steps_inference, packed_phones, packed_speaker, batch_size=bsz, mask=packed_mask
+                        training_args.ddpm_num_steps_inference,
+                        packed_phones,
+                        packed_speaker,
+                        batch_size=bsz,
+                        mask=packed_mask,
+                        lm_cond=lm_cond,
+                        lm_mask=lm_mask,
                     )
                 elif training_args.loss_type == "mse":
                     noise = torch.randn(packed_prosody.shape).to("cpu")
                     packed_mask = packed_mask.to("cpu")
-                    timestep = torch.randint(
-                        0,
-                        noise_scheduler_eval.config.num_train_timesteps,
-                        (bsz,),
-                        device=packed_prosody.device,
-                    ).long().to("cpu")
+                    timestep = (
+                        torch.randint(
+                            0,
+                            noise_scheduler_eval.config.num_train_timesteps,
+                            (bsz,),
+                            device=packed_prosody.device,
+                        )
+                        .long()
+                        .to("cpu")
+                    )
                     packed_phones = packed_phones.to("cpu")
                     packed_speaker = packed_speaker.to("cpu")
                     output = eval_model(
-                        noise, packed_mask, timestep, packed_phones, packed_speaker
+                        noise,
+                        packed_mask,
+                        timestep,
+                        packed_phones,
+                        packed_speaker,
+                        lm_cond=lm_cond,
+                        lm_mask=lm_mask,
                     )
                 output = output * packed_mask.unsqueeze(-1).cpu()
                 for b in range(bsz):
@@ -332,8 +393,12 @@ def evaluate():
                     wandb_log(
                         "val",
                         {
-                            f"{b}_output_img": wandb.Image(f"figures/val/{b}_output.png"),
-                            f"{b}_target_img": wandb.Image(f"figures/val/{b}_target.png"),
+                            f"{b}_output_img": wandb.Image(
+                                f"figures/val/{b}_output.png"
+                            ),
+                            f"{b}_target_img": wandb.Image(
+                                f"figures/val/{b}_target.png"
+                            ),
                         },
                         print_log=False,
                     )
@@ -372,17 +437,24 @@ def evaluate():
                 elif training_args.loss_type == "mse":
                     noise = torch.randn(packed_mel.shape).to("cpu")
                     packed_mask = packed_mask.to("cpu")
-                    timestep = torch.randint(
-                        0,
-                        noise_scheduler_eval.config.num_train_timesteps,
-                        (bsz,),
-                        device=packed_mel.device,
-                    ).long().to("cpu")
+                    timestep = (
+                        torch.randint(
+                            0,
+                            noise_scheduler_eval.config.num_train_timesteps,
+                            (bsz,),
+                            device=packed_mel.device,
+                        )
+                        .long()
+                        .to("cpu")
+                    )
                     packed_phones = packed_phones.to("cpu")
                     packed_speaker = packed_speaker.to("cpu")
                     packed_prosody = packed_prosody.to("cpu")
                     for prosody_threshold in [0.0, 0.5, 1.0]:
-                        prosody_mask = torch.rand(bsz, packed_prosody.shape[1], 1) <= prosody_threshold
+                        prosody_mask = (
+                            torch.rand(bsz, packed_prosody.shape[1], 1)
+                            <= prosody_threshold
+                        )
                         packed_prosody = packed_prosody * prosody_mask
                         output = eval_model(
                             noise,
@@ -415,17 +487,33 @@ def evaluate():
                         denormed_output = denorm_mel(b_output.transpose(0, 1))
                         denormed_target = denorm_mel(b_packed_mel.cpu().transpose(0, 1))
                         wav = synth(denormed_output)
-                        torchaudio.save(f"figures/val/{b}_{t}_output.wav", torch.from_numpy(wav), 22050)
+                        torchaudio.save(
+                            f"figures/val/{b}_{t}_output.wav",
+                            torch.from_numpy(wav),
+                            22050,
+                        )
                         wav = synth(denormed_target)
-                        torchaudio.save(f"figures/val/{b}_{t}_target.wav", torch.from_numpy(wav), 22050)
+                        torchaudio.save(
+                            f"figures/val/{b}_{t}_target.wav",
+                            torch.from_numpy(wav),
+                            22050,
+                        )
                         # log to wandb
                         wandb_log(
                             "val",
                             {
-                                f"{b}_{t}_output_img": wandb.Image(f"figures/val/{b}_{t}_output.png"),
-                                f"{b}_{t}_target_img": wandb.Image(f"figures/val/{b}_{t}_target.png"),
-                                f"{b}_{t}_output_wav": wandb.Audio(f"figures/val/{b}_{t}_output.wav"),
-                                f"{b}_{t}_target_wav": wandb.Audio(f"figures/val/{b}_{t}_target.wav"),
+                                f"{b}_{t}_output_img": wandb.Image(
+                                    f"figures/val/{b}_{t}_output.png"
+                                ),
+                                f"{b}_{t}_target_img": wandb.Image(
+                                    f"figures/val/{b}_{t}_target.png"
+                                ),
+                                f"{b}_{t}_output_wav": wandb.Audio(
+                                    f"figures/val/{b}_{t}_output.wav"
+                                ),
+                                f"{b}_{t}_target_wav": wandb.Audio(
+                                    f"figures/val/{b}_{t}_target.wav"
+                                ),
                             },
                             print_log=False,
                         )
@@ -447,7 +535,14 @@ def evaluate_loss_only():
     with torch.no_grad():
         for i, batch in tqdm(enumerate(val_dl), desc="val"):
             if training_args.train_type == "encoder":
-                packed_prosody, packed_phones, packed_speaker, packed_mask = batch
+                (
+                    packed_prosody,
+                    packed_phones,
+                    packed_speaker,
+                    packed_mask,
+                    lm_inputs,
+                ) = batch
+                lm_cond, lm_mask = get_lm_cond_and_mask(lm_inputs)
                 noise = torch.randn(packed_prosody.shape).to(packed_prosody.device)
                 bsz = packed_prosody.shape[0]
                 timesteps = torch.randint(
@@ -457,15 +552,29 @@ def evaluate_loss_only():
                     device=packed_prosody.device,
                 ).long()
                 if training_args.loss_type == "diffusion":
-                    packed_prosody = (packed_prosody * 2 - 1) * training_args.diffusion_scale
+                    packed_prosody = (
+                        packed_prosody * 2 - 1
+                    ) * training_args.diffusion_scale
                     noisy_ = noise_scheduler.add_noise(packed_prosody, noise, timesteps)
                     output = model(
-                        noisy_, packed_mask, timesteps, packed_phones, packed_speaker
+                        noisy_,
+                        packed_mask,
+                        timesteps,
+                        packed_phones,
+                        packed_speaker,
+                        lm_cond=lm_cond,
+                        lm_mask=lm_mask,
                     )
                     loss = F.mse_loss(output, noise, reduction="none")
                 elif training_args.loss_type == "mse":
                     output = model(
-                        noise, packed_mask, timesteps, packed_phones, packed_speaker
+                        noise,
+                        packed_mask,
+                        timesteps,
+                        packed_phones,
+                        packed_speaker,
+                        lm_cond=lm_cond,
+                        lm_mask=lm_mask,
                     )
                     loss = F.mse_loss(output, packed_prosody, reduction="none")
                 loss = loss * packed_mask.unsqueeze(-1)
@@ -516,7 +625,9 @@ def evaluate_loss_only():
 
 
 def main():
-    global accelerator, training_args, model_args, collator_args, train_dl, val_dl, optimizer, scheduler, model, global_step, pbar, noise_scheduler, noise_scheduler_eval
+    global accelerator, training_args, model_args, collator_args, train_dl, val_dl, optimizer, scheduler, model, global_step, pbar, noise_scheduler, noise_scheduler_eval, lm_model
+
+    lm_model = None
 
     global_step = 0
 
@@ -557,7 +668,6 @@ def main():
             dec_collator_args,
         ) = parser.parse_args_into_dataclasses()
 
-    
     if not training_args.bf16:
         accelerator = Accelerator()
     else:
@@ -678,6 +788,9 @@ def main():
         plt.savefig("figures/first_batch.png")
         plt.close()
 
+    if training_args.train_type == "encoder" and model_args.lm_condition is not None:
+        lm_model = AutoModelForMaskedLM.from_pretrained(model_args.lm_condition)
+
     # dataloader
     train_dl = DataLoader(
         train_ds,
@@ -730,9 +843,14 @@ def main():
     )
 
     # accelerator
-    model, optimizer, train_dl, val_dl, scheduler = accelerator.prepare(
-        model, optimizer, train_dl, val_dl, scheduler
-    )
+    if lm_model is not None:
+        model, optimizer, train_dl, val_dl, scheduler, lm_model = accelerator.prepare(
+            model, optimizer, train_dl, val_dl, scheduler, lm_model
+        )
+    else:
+        model, optimizer, train_dl, val_dl, scheduler = accelerator.prepare(
+            model, optimizer, train_dl, val_dl, scheduler
+        )
 
     # evaluation
     if training_args.eval_only:

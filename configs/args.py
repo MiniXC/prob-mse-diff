@@ -37,10 +37,14 @@ class TrainingArgs:
     ddpm_beta_schedule: str = "linear"
     ddpm_num_steps_inference: int = 20
     diffusion_scale: float = 0.7
-    loss_type: str = "diffusion" # diffusion or mse
+    loss_type: str = "diffusion"  # diffusion or mse
     prosody_guidance: bool = True
     bf16: bool = False
-    n_epochs: int = None # this is set by the trainer, changing this value will have no effect
+    n_epochs: int = (
+        None  # this is set by the trainer, changing this value will have no effect
+    )
+    decay_pack_prob: bool = False
+    decay_pack_prob_min: float = 0.4
 
 
 @dataclass
@@ -48,7 +52,8 @@ class EncoderCollatorArgs:
     enc_max_length: int = 512
     enc_pack_factor: int = 4
     enc_verbose: bool = False
-    enc_pack_prob: float = 0.95
+    enc_pack_prob: float = 1.0
+    lm_condition_max_length: int = 128
 
 
 @dataclass
@@ -97,7 +102,9 @@ class ModelArgs:
     mid_block_scale_factor: float = 1
     act_fn: str = "silu"
     norm_num_groups: int = 32
-    norm_eps: float = 1e-5
+    norm_eps: float = 1e-
+    lm_condition: str = "xlm-roberta-base"
+    lm_input_dim: int = 768
     cross_attention_dim: int = 512
     transformer_layers_per_block: int = 1
     num_attention_heads: int = 8

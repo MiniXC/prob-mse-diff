@@ -48,6 +48,8 @@ class DDPMPipeline(DiffusionPipeline):
         batch_size=1,
         generator=None,
         mask=None,
+        lm_cond=None,
+        lm_mask=None,
     ):
         if isinstance(self.model_args.sample_size, int):
             image_shape = (
@@ -77,11 +79,13 @@ class DDPMPipeline(DiffusionPipeline):
         mask = mask.to(self._device)
 
         if self.model_args.model_type == "decoder":
-            prosody_mask = torch.rand((batch_size, prosody_cond.shape[1], 1), device=self._device) <= prosody_guidance
+            prosody_mask = (
+                torch.rand((batch_size, prosody_cond.shape[1], 1), device=self._device)
+                <= prosody_guidance
+            )
             prosody_cond = prosody_cond * prosody_mask
 
         for t in self.progress_bar(self.scheduler.timesteps):
-
             # image = self.scheduler.scale_model_input(image, t)
 
             # 1. predict noise model_output
@@ -92,6 +96,8 @@ class DDPMPipeline(DiffusionPipeline):
                     t,
                     phone_cond,
                     speaker_cond,
+                    lm_cond=lm_cond,
+                    lm_mask=lm_mask,
                 )
             elif self.model_args.model_type == "decoder":
                 model_output = self.unet(
@@ -127,7 +133,9 @@ class DDPMPipeline(DiffusionPipeline):
         return image
 
     @staticmethod
-    def from_pretrained(path_or_hubid, model, device="cpu", scheduler_class=DDPMScheduler):
+    def from_pretrained(
+        path_or_hubid, model, device="cpu", scheduler_class=DDPMScheduler
+    ):
         path = Path(path_or_hubid)
         if path.exists():
             config_file = path / "model_config.yml"
@@ -145,7 +153,7 @@ class DDPMPipeline(DiffusionPipeline):
             timestep_spacing="linspace",
         )
         pipeline = DDPMPipeline(
-            model, 
+            model,
             scheduler,
             args,
             training_args,

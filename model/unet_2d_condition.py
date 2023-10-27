@@ -69,8 +69,8 @@ class WrapperUNet2DConditionModel(nn.Module):
         speaker_cond,
         prosody_cond=None,
         attention_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
+        lm_cond=None,
+        lm_mask=None,
     ):
         phone_emb = self.phone_embedding(phone_cond)
         phone_emb = phone_emb.reshape(sample.shape[0], 1, -1, 80)
@@ -241,6 +241,14 @@ class CustomUNet2DConditionModel(nn.Module):
             args.cross_attention_dim = (args.cross_attention_dim,) * len(
                 args.down_block_types
             )
+
+        if args.model_type == "encoder":
+            if args.lm_input_dim is not None:
+                self.lm_embedding = nn.Sequential(
+                    nn.Linear(args.lm_input_dim, args.cross_attention_dim[0]),
+                    nn.GELU(),
+                    nn.Linear(args.cross_attention_dim[0], args.cross_attention_dim[0]),
+                )
 
         if isinstance(args.layers_per_block, int):
             args.layers_per_block = [args.layers_per_block] * len(args.down_block_types)
@@ -431,8 +439,8 @@ class CustomUNet2DConditionModel(nn.Module):
         speaker_cond,
         prosody_cond=None,
         attention_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
+        lm_cond=None,
+        lm_mask=None,
     ):
         padding_mask = sample_mask.unsqueeze(-1)
         upsample_size = None
@@ -441,11 +449,11 @@ class CustomUNet2DConditionModel(nn.Module):
             attention_mask = (1 - attention_mask.to(sample.dtype)) * -10000.0
             attention_mask = attention_mask.unsqueeze(1)
 
-        if encoder_attention_mask is not None:
-            encoder_attention_mask = (
-                1 - encoder_attention_mask.to(sample.dtype)
-            ) * -10000.0
-            encoder_attention_mask = encoder_attention_mask.unsqueeze(1)
+        if lm_mask is not None:
+            lm_mask = (1 - lm_mask.to(sample.dtype)) * -10000.0
+
+        if lm_cond is not None:
+            lm_cond = self.lm_embedding(lm_cond)
 
         if self.args.center_input_sample:
             sample = 2 * sample - 1.0
@@ -495,9 +503,9 @@ class CustomUNet2DConditionModel(nn.Module):
                 sample, res_samples = downsample_block(
                     hidden_states=sample,
                     temb=emb,
-                    encoder_hidden_states=encoder_hidden_states,
+                    encoder_hidden_states=lm_cond,
                     attention_mask=attention_mask,
-                    encoder_attention_mask=encoder_attention_mask,
+                    encoder_attention_mask=lm_mask,
                 )
             else:
                 sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
@@ -509,9 +517,9 @@ class CustomUNet2DConditionModel(nn.Module):
             sample = self.mid_block(
                 sample,
                 emb,
-                encoder_hidden_states=encoder_hidden_states,
+                encoder_hidden_states=lm_cond,
                 attention_mask=attention_mask,
-                encoder_attention_mask=encoder_attention_mask,
+                encoder_attention_mask=lm_mask,
             )
 
         # 5. up
@@ -535,10 +543,10 @@ class CustomUNet2DConditionModel(nn.Module):
                     hidden_states=sample,
                     temb=emb,
                     res_hidden_states_tuple=res_samples,
-                    encoder_hidden_states=encoder_hidden_states,
+                    encoder_hidden_states=lm_cond,
                     upsample_size=upsample_size,
                     attention_mask=attention_mask,
-                    encoder_attention_mask=encoder_attention_mask,
+                    encoder_attention_mask=lm_mask,
                 )
             else:
                 sample = upsample_block(
