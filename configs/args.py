@@ -52,7 +52,7 @@ class EncoderCollatorArgs:
     enc_max_length: int = 512
     enc_pack_factor: int = 4
     enc_verbose: bool = False
-    enc_pack_prob: float = 1.0
+    enc_pack_prob: float = 0.0
     lm_condition_max_length: int = 128
 
 

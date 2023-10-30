@@ -152,8 +152,17 @@ def save_checkpoint(name_override=None):
 def get_lm_cond_and_mask(lm_inputs):
     if lm_inputs is not None:
         with torch.no_grad():
-            lm_cond = lm_model(**lm_inputs, output_hidden_states=True).hidden_states[-1]
-            lm_mask = lm_inputs["attention_mask"].to(lm_cond.device)
+            try:
+                lm_cond = lm_model(
+                    **lm_inputs, output_hidden_states=True
+                ).hidden_states[-1]
+                lm_mask = lm_inputs["attention_mask"].to(lm_cond.device)
+            except ValueError:
+                lm_cond = None
+                lm_mask = None
+                console_print(
+                    "[yellow]WARNING[/yellow]: lm model input is not valid, skipping"
+                )
     else:
         lm_cond = None
         lm_mask = None
@@ -676,6 +685,7 @@ def main():
     if training_args.train_type == "encoder":
         collator_args = enc_collator_args
         max_length = collator_args.enc_max_length
+        collator_args.lm_condition = model_args.lm_condition
     elif training_args.train_type == "decoder":
         collator_args = dec_collator_args
         max_length = collator_args.dec_max_length
