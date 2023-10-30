@@ -86,7 +86,7 @@ class DDPMPipeline(DiffusionPipeline):
             prosody_cond = prosody_cond * prosody_mask
 
         for t in self.progress_bar(self.scheduler.timesteps):
-            # image = self.scheduler.scale_model_input(image, t)
+            image = self.scheduler.scale_model_input(image, t)
 
             # 1. predict noise model_output
             if self.model_args.model_type == "encoder":

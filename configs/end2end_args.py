@@ -13,8 +13,8 @@ class End2EndArgs:
     batch_size: int = 8
     g2p_tokenizer: str = "google/byt5-small"
     g2p_model: str = "models/v5/byt5_speaker"
-    encoder_model: str = "models/v5/encoder_diffusion_170k"
-    decoder_model: str = "models/v5/decoder_diffusion_64k"
+    encoder_model: str = "models/v6/encoder_diffusion"
+    decoder_model: str = "models/v6/decoder_diffusion"
     ddpm_num_steps: int = 1000
     ddpm_beta_schedule: str = "linear"
     steps: int = 40

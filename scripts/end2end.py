@@ -70,7 +70,7 @@ def prepare_for_encoder(item, phones, phone2id, lm_model, lm_tokenizer):
             truncation=True,
         )
         with torch.no_grad():
-            lm_cond = lm_model(**lm_inputs, return_hidden_states=True).hidden_states[-1]
+            lm_cond = lm_model(**lm_inputs, output_hidden_states=True).hidden_states[-1]
             lm_mask = lm_inputs["attention_mask"]
     else:
         lm_cond = None
@@ -145,9 +145,9 @@ def main():
     g2p_model = ByT5Wrapper.from_pretrained(args.g2p_model)
     encoder_model = CustomUNet2DConditionModel.from_pretrained(args.encoder_model)
     decoder_model = CustomUNet2DConditionModel.from_pretrained(args.decoder_model)
-    if encoder_model.lm_condition is not None:
-        lm_model = AutoModelForMaskedLM.from_pretrained(encoder_model.lm_condition)
-        lm_tokenizer = AutoTokenizer.from_pretrained(encoder_model.lm_condition)
+    if encoder_model.args.lm_condition is not None:
+        lm_model = AutoModelForMaskedLM.from_pretrained(encoder_model.args.lm_condition)
+        lm_tokenizer = AutoTokenizer.from_pretrained(encoder_model.args.lm_condition)
     else:
         lm_model = None
         lm_tokenizer = None
@@ -178,7 +178,7 @@ def main():
     first_item = dataset[0]
     first_item[
         "text"
-    ] = "Das ist ein Test in dem ich versuche, Deutsch zu sprechen, obwohl ich eigentlich Englisch spreche."
+    ] = "Hi Gustav, this is another test of the Text-to-Speech system. I hope you like it."
     first_item_g2p = prepare_for_g2p(first_item, tokenizer)
 
     console.rule("Running G2P")
@@ -195,7 +195,8 @@ def main():
     console.print(f"G2P result: {g2p_result}")
     # convert to phones
 
-    first_item_encoder = prepare_for_encoder(first_item, g2p_result, phone2id, lm_model)
+    g2p_result = ["<s0> h aɪ ɡ ʌ s t æ v ð ɪ s ɪ z ɐ n ʌ ð ɚ t ɛ s t ʌ v ð ə t iː t iː ɛ s s ɪ s t ə m <s1> a ɪ h o ʊ p j uː l aɪ k ɪ t <s0>"]
+    first_item_encoder = prepare_for_encoder(first_item, g2p_result, phone2id, lm_model, lm_tokenizer)
 
     if args.teacher_force_encoder:
         teacher_forced = EncoderCollator.item_to_arrays(first_item)

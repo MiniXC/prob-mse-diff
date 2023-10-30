@@ -102,7 +102,7 @@ class ModelArgs:
     mid_block_scale_factor: float = 1
     act_fn: str = "silu"
     norm_num_groups: int = 32
-    norm_eps: float = 1e-
+    norm_eps: float = 1e-5
     lm_condition: str = "xlm-roberta-base"
     lm_input_dim: int = 768
     cross_attention_dim: int = 512
