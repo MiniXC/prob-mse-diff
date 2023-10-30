@@ -140,7 +140,7 @@ class EncoderCollator:
         items = [EncoderCollator.item_to_arrays(item) for item in batch]
         prosody, phones, speaker = zip(*items)
         pack_sequence = np.random.rand() < self.pack_probability
-        pack_sequence = pack_sequence or self.inference
+        pack_sequence = pack_sequence and (not self.inference)
         if pack_sequence:
             packed_prosody, packed_phones, packed_speaker, packed_mask = self.pack(
                 prosody, phones, speaker
@@ -349,7 +349,7 @@ class DecoderCollator:
         items = [DecoderCollator.item_to_arrays(item) for item in batch]
         prosody, phones, speaker, mel = zip(*items)
         pack_sequence = np.random.rand() < self.pack_probability
-        pack_sequence = pack_sequence and not self.inference
+        pack_sequence = pack_sequence and (not self.inference)
         if pack_sequence:
             (
                 packed_prosody,
