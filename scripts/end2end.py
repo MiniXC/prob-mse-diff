@@ -18,6 +18,7 @@ from datasets import load_dataset
 from configs.end2end_args import End2EndArgs
 from model.byt5_wrapper import ByT5Wrapper
 from model.unet_2d_condition import CustomUNet2DConditionModel
+from model.cwt_inverter import CWTInverterModel
 from model.pipeline import DDPMPipeline
 from diffusers import DDPMScheduler, EulerAncestralDiscreteScheduler
 from PIL import Image
@@ -86,11 +87,30 @@ def prepare_for_encoder(item, phones, phone2id, lm_model, lm_tokenizer):
     return dict
 
 
-def prepare_for_decoder(item, item_for_encoder, prosody):
+def prepare_for_decoder(item, item_for_encoder, prosody, cwt_inverter=None):
     prosody = prosody.numpy()
-    duration = prosody[:, 30]
-    # denormalize
-    duration = np.ceil(2 ** (duration * 11)).astype(np.int32)
+    if cwt_inverter is not None:
+        cwt_input = torch.zeros((1, 512, 9))
+        cwt_input[:, :prosody.shape[0], :] = torch.from_numpy(prosody[:, 31:31+9]).unsqueeze(0)
+        with torch.no_grad():
+            print(cwt_input.shape)
+            pred_duration = cwt_inverter(cwt_input)
+            print(pred_duration.shape)
+        pred_duration = pred_duration.squeeze(0)
+        pred_duration = pred_duration.flatten()
+        pred_duration = pred_duration.numpy()
+        duration = prosody[:, 30]
+        pred_duration = pred_duration[:duration.shape[0]]
+        duration_mean = np.mean(duration)
+        duration_std = np.std(duration)
+        pred_duration = pred_duration * duration_std + duration_mean
+        pred_duration, orig_duration = 2 ** (pred_duration * 11), 2 ** (duration * 11)
+        # blend between predicted and original duration
+        duration = np.ceil((pred_duration + orig_duration) / 2).astype(np.int32)
+    else:
+        duration = prosody[:, 30]
+        # denormalize
+        duration = np.ceil(2 ** (duration * 11)).astype(np.int32)
     print(duration)
 
     phones = item_for_encoder["phones"][0].numpy()
@@ -110,6 +130,8 @@ def prepare_for_decoder(item, item_for_encoder, prosody):
     speaker = torch.from_numpy(speaker)
     mask = torch.from_numpy(mask)
     prosody = torch.from_numpy(prosody)
+    # if cwt_inverter is not None:
+    #     prosody[:pred_duration.shape[0], 30] = torch.from_numpy(pred_duration)
     # pad all to args.dec_length
     # first, create mask
     mask = torch.ones((1, args.dec_length), dtype=torch.bool)
@@ -151,6 +173,11 @@ def main():
     else:
         lm_model = None
         lm_tokenizer = None
+    if args.cwt_inverter_model is not None:
+        cwt_inverter = CWTInverterModel.from_pretrained(args.cwt_inverter_model)
+    else:
+        cwt_inverter = None
+
     synth = Synthesiser()
     g2p_model.eval()
     encoder_model.eval()
@@ -175,10 +202,10 @@ def main():
     else:
         dataset = load_dataset(args.dataset, split=args.unseen_validation_split)
 
-    first_item = dataset[0]
+    first_item = dataset[8_000]
     first_item[
         "text"
-    ] = "Hi Gustav, this is another test of the Text-to-Speech system. I hope you like it."
+    ] = "Thank you for coming to my talk on using synthetic data for automatic speech recognition today. I'm excited to share with you some of the work that we've been doing to quantify the divergence between real and synthetic speech data, as well as reducing it."
     first_item_g2p = prepare_for_g2p(first_item, tokenizer)
 
     console.rule("Running G2P")
@@ -195,7 +222,6 @@ def main():
     console.print(f"G2P result: {g2p_result}")
     # convert to phones
 
-    g2p_result = ["<s0> h aɪ ɡ ʌ s t æ v ð ɪ s ɪ z ɐ n ʌ ð ɚ t ɛ s t ʌ v ð ə t iː t iː ɛ s s ɪ s t ə m <s1> a ɪ h o ʊ p j uː l aɪ k ɪ t <s0>"]
     first_item_encoder = prepare_for_encoder(first_item, g2p_result, phone2id, lm_model, lm_tokenizer)
 
     if args.teacher_force_encoder:
@@ -219,7 +245,7 @@ def main():
         device="cpu",
     )
     encoder_result = encoder_pipeline(
-        args.steps,
+        args.enc_steps,
         first_item_encoder["phones"],
         first_item_encoder["speaker"],
         batch_size=1,
@@ -234,7 +260,7 @@ def main():
 
     console.rule("Running decoder")
     first_item_decoder = prepare_for_decoder(
-        first_item, first_item_encoder, encoder_result
+        first_item, first_item_encoder, encoder_result, cwt_inverter
     )
 
     if args.teacher_force_decoder:
@@ -273,7 +299,7 @@ def main():
         "prosody",
     )
     decoder_result = decoder_pipeline(
-        args.steps,
+        args.dec_steps,
         first_item_decoder["phones"],
         first_item_decoder["speaker"],
         first_item_decoder["prosody"],

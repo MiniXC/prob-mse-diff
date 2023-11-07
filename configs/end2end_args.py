@@ -13,11 +13,13 @@ class End2EndArgs:
     batch_size: int = 8
     g2p_tokenizer: str = "google/byt5-small"
     g2p_model: str = "models/v5/byt5_speaker"
-    encoder_model: str = "models/v6/encoder_diffusion"
-    decoder_model: str = "models/v6/decoder_diffusion"
+    encoder_model: str = "models/v7/encoder_diffusion"
+    decoder_model: str = "models/v7/decoder_diffusion"
+    cwt_inverter_model: str = "models/v7/cwt_inverter"
     ddpm_num_steps: int = 1000
     ddpm_beta_schedule: str = "linear"
-    steps: int = 40
+    enc_steps: int = 200
+    dec_steps: int = 50
     enc_length: int = 512
     dec_length: int = 2048
     teacher_force_encoder: bool = False
